@@ -1,0 +1,58 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push origin *)",
+      "Bash(git switch *)",
+      "Bash(git checkout *)",
+      "Bash(git branch *)",
+      "Bash(git restore *)",
+      "Bash(git stash *)",
+      "Bash(git rebase origin/main)",
+      "Bash(gh pr *)",
+      "Bash(gh issue *)",
+      "Bash(gh label *)",
+      "Bash(gh project *)",
+      "Bash(gh api *)",
+      "Bash(gh run *)",
+      "Bash(gh search *)",
+      "Bash(make build)",
+      "Bash(make lint)",
+      "Bash(make test)",
+      "Bash(make test-integration)"
+    ],
+    "deny": [
+      "Bash(git push origin main:*)",
+      "Bash(git push origin HEAD:main:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git merge:*)",
+      "Bash(gh pr merge:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=$(cat); printf '%s' \"$d\" | grep -qE '\\b(git|gh)\\b' && printf '%s' \"$d\" | python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/git-policy-reminder.py\"; exit 0"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Before responding, read and apply the project instructions in CLAUDE.md and AGENTS.md (your name is set there). These OVERRIDE default behavior. HARD RULE: never make assumptions — present every decision to the owner as concrete options (or wait for their instruction); never pick a default and proceed unless they explicitly grant permission. Git/GitHub policy: you may commit, push to feature branches, and open/update PRs and issues, but never merge, push to the main branch, force-push, or delete branches or tags. Never add a Co-Authored-By / AI-attribution trailer.\"}}'"
+          }
+        ]
+      }
+    ]
+  }
+}
