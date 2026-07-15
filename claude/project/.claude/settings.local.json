@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git ls-remote *)",
+      "Bash(git worktree *)",
+      "Bash(git fetch *)",
+      "Bash(git rev-list *)",
+      "Bash(echo \"leftover-check EXIT:$?\")",
+      "Bash(amp --help)",
+      "Bash(amp --version)",
+      "Bash(git --no-pager log --oneline -1)",
+      "Bash(amp threads *)",
+      "Bash(timeout 120 claude -p \"reply with the single word: ok\" --output-format stream-json --verbose)",
+      "Read(//tmp/**)",
+      "Skill(code-review)",
+      "Workflow(code-review)"
+    ]
+  }
+}
