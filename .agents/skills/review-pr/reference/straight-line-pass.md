@@ -64,8 +64,6 @@ Overall Gate: Gx — <name>
 ## Keep as-is
 - <Code that looks complex but should remain for domain clarity.>
 
-## Clear signals
-- <Good simplification already present.>
 ```
 
 Advise only — propose the change and its rationale; never edit the code.

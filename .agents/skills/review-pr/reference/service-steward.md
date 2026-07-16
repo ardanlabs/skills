@@ -56,9 +56,6 @@ Overall Gate: Gx — <name>
 - Patch direction: <smallest safe fix>
 - Verify: <test or review step>
 
-## Clear signals
-- <Good patterns worth keeping.>
-
 ## Open checks
 - <Anything outside the available diff.>
 ```

@@ -9,6 +9,7 @@
 ## Reasoning
 
 - Think efficiently and concisely; short, direct steps. Summarize reasoning in ≤50 words.
+- Do not estimate changes/work in human hours. We have infinity time and money. We need to find the best/proper solution to problems.
 
 ## Working with the user
 
@@ -57,5 +58,7 @@ Primitives live at the edges (API JSON structs, DB row structs); strong types (`
 ## Tools
 
 - Prefer `rg` (ripgrep) over `grep`.
+- Externally run CLI/tool exit status: always capture with `EXIT_CODE=$?` on the line right after the command, then test `$EXIT_CODE`. Never read `$?` after any intervening command.
+- Multiple tools in one command: chain with `&&` so the first failure breaks the chain and a single `EXIT_CODE=$?` covers the whole run — no intermediate results. Override only when the user asks.
 - Use the `gopls` MCP for all `.go` interaction (docs, refactoring, cross-file/package changes). List its tools first, then use them.
 - Only if the `gopls` MCP is missing: fall back to CLI `go doc` and `gopls` (via LSP).

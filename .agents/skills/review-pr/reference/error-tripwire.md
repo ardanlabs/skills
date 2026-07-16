@@ -58,9 +58,6 @@ Overall Gate: Gx — <name>
 - Patch direction: <return / wrap / log / stop / fallback change>
 - Verify: <test or review step>
 
-## Good handling observed
-- <Examples worth preserving.>
-
 ## Open checks
 - <External behavior or spec assumptions, if any.>
 ```

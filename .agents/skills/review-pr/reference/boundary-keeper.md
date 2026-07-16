@@ -59,9 +59,6 @@ Overall Gate: Gx — <name>
 - Patch direction: <constructor / converter / field visibility / validation change>
 - Verify: <test or review step>
 
-## Clear signals
-- <Strong type decisions worth keeping.>
-
 ## Open checks
 - <Domain-invariant questions.>
 ```

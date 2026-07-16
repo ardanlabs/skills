@@ -56,9 +56,6 @@ Overall Gate: Gx — <name>
 - Suggested wording:
   > <replacement comment, if useful>
 
-## Clear signals
-- <Comments accurate and worth keeping.>
-
 ## Open checks
 - <Claims needing product or domain confirmation.>
 ```
