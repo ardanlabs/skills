@@ -17,7 +17,7 @@ A collection of AI skills for development work, primarily Go. Compatible with Cl
 | [layered-architecture-types](.agents/skills/layered-architecture-types/SKILL.md) | Enforce primitives-at-edges / strong-types-in-Business layering and the toBus/fromBusResponse/toDB converter pattern.                   |
 | [business-layer-extensions](.agents/skills/business-layer-extensions/SKILL.md)   | Add cross-cutting concerns (OTEL, logging, metrics) via the `ExtBusiness`/`Extension` decorator seam.                                   |
 | [branching-logic-flow](.agents/skills/branching-logic-flow/SKILL.md)             | Prefer defaulting and naked switches over if/else chains for shallow branching.                                                         |
-| [review-pr](.agents/skills/review-pr/SKILL.md)                                   | Read-only PR review lenses for correctness, error visibility, comments, tests, contracts, and simplification across all repo languages. |
+| [pr-review](.agents/skills/pr-review/SKILL.md)                                   | Read-only PR review lenses for correctness, error visibility, comments, tests, contracts, and simplification across all repo languages. |
 
 ## Claude Code settings
 

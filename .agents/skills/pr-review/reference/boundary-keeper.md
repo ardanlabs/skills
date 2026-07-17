@@ -41,9 +41,9 @@ Scope: <scope>
 Overall Gate: Gx — <name>
 
 ## Type ledger
-| Type | Layer | Purpose | Posture |
-| --- | --- | --- | --- |
-| `<TypeName>` | App/Business/Storage | <purpose> | Gx |
+| Type         | Layer                | Purpose   | Posture |
+|--------------|----------------------|-----------|---------|
+| `<TypeName>` | App/Business/Storage | <purpose> | Gx      |
 
 ## Per-type review
 ### `<TypeName>`

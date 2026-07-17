@@ -57,11 +57,11 @@ Prefer non-pointer types at every layer. Reach for a pointer only when nothing e
 
 ## Converter functions (MUST exist per type, both directions)
 
-| Direction          | Layer pair         | Name                    | Returns |
-|--------------------|--------------------|-------------------------|---------|
-| primitive → strong | App → Business     | `toBus<Type>`           | `(busInput, error)` — parse + validate, accumulate `errs.FieldErrors` |
-| strong → primitive | Business → App     | `fromBus<Type>Response` | response struct — convert each strong field with `.String()` etc. |
-| strong → native    | Business → Storage | `toDB<Type>`            | db row struct |
+| Direction          | Layer pair         | Name                    | Returns                                                                 |
+|--------------------|--------------------|-------------------------|-------------------------------------------------------------------------|
+| primitive → strong | App → Business     | `toBus<Type>`           | `(busInput, error)` — parse + validate, accumulate `errs.FieldErrors`   |
+| strong → primitive | Business → App     | `fromBus<Type>Response` | response struct — convert each strong field with `.String()` etc.       |
+| strong → native    | Business → Storage | `toDB<Type>`            | db row struct                                                           |
 | native → strong    | Storage → Business | `toBus<Type>`           | `(busType, error)` — parse via the relevant `business/types/*` `Parse*` |
 
 Rules:

@@ -42,8 +42,8 @@ Overall Gate: Gx — <name>
 
 ## Behavior map
 | Changed behavior | Existing test coverage | Assessment |
-| --- | --- | --- |
-| <behavior> | <test/file or none> | Gx |
+|------------------|------------------------|------------|
+| <behavior>       | <test/file or none>    | Gx         |
 
 ## Gate findings
 ### Gx — <short title>

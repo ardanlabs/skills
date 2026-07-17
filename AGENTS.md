@@ -36,7 +36,7 @@ Always apply these skills when doing feature work; do not rely on memory:
 
 ## Reviewing a PR
 
-- `review-pr` — for any PR / diff / pre-commit review. It runs a guided review: asks for missing inputs (diff scope, issue-tracker URL, issue id), reviews the diff against the ticket's acceptance criteria, and writes auto-numbered findings and Mermaid diagrams under `.reviews/<issue-id>/`.
+- `pr-review` — for any PR / diff / pre-commit review. It runs a guided review: asks for missing inputs (diff scope, issue-tracker URL, issue id), reviews the diff against the ticket's acceptance criteria, and writes auto-numbered findings and Mermaid diagrams under `.reviews/<issue-id>/`.
 
 ### Layer conversions (from `layered-architecture-types`)
 
