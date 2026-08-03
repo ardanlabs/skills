@@ -19,6 +19,20 @@ A collection of AI skills for development work, primarily Go. Compatible with Cl
 | [branching-logic-flow](.agents/skills/branching-logic-flow/SKILL.md)             | Prefer defaulting and naked switches over if/else chains for shallow branching.                                                         |
 | [pr-review](.agents/skills/pr-review/SKILL.md)                                   | Read-only PR review lenses for correctness, error visibility, comments, tests, contracts, and simplification across all repo languages. |
 
+## Install as a Claude Code plugin
+
+This repo is a [Claude Code plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces) named `ardanlabs`. Each skill is a separate plugin, so you install only the ones you want.
+
+```
+/plugin marketplace add ardanlabs/skills
+/plugin install pr-review@ardanlabs
+/reload-plugins
+```
+
+Available plugins: `use-modern-go`, `layered-architecture-types`, `business-layer-extensions`, `branching-logic-flow`, `pr-review`.
+
+Plugin skills are namespaced, so `pr-review` is invoked as `/pr-review:pr-review`. Pull newer versions with `/plugin marketplace update ardanlabs` — plugins are unpinned, so every commit to `main` is a new version.
+
 ## Claude Code settings
 
 Example Claude Code configuration, split into global (user-level) and project-level.
@@ -39,6 +53,7 @@ AGENTS.md           # agent identity, policy, and skill triggers
 CLAUDE.md           # Claude Code entry point -> AGENTS.md
 .agents/skills/     # canonical skill files
 .claude/skills      # symlink -> ../.agents/skills
+.claude-plugin/     # marketplace.json — plugin catalog pointing at .agents/skills
 claude/global/      # example user-level Claude Code config
 claude/project/     # example project-level Claude Code config
 ```

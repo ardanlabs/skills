@@ -1,0 +1,60 @@
+{
+  "name": "ardanlabs",
+  "description": "Ardan Labs skills for Go, layered architecture, and PR review.",
+  "owner": {
+    "name": "Ardan Labs",
+    "url": "https://github.com/ardanlabs"
+  },
+  "plugins": [
+    {
+      "name": "use-modern-go",
+      "source": "./",
+      "skills": ["./.agents/skills/use-modern-go"],
+      "description": "Apply modern Go syntax guidelines based on the project's Go version.",
+      "category": "development",
+      "keywords": ["go", "golang", "style"],
+      "license": "Apache-2.0",
+      "repository": "https://github.com/ardanlabs/skills"
+    },
+    {
+      "name": "layered-architecture-types",
+      "source": "./",
+      "skills": ["./.agents/skills/layered-architecture-types"],
+      "description": "Enforce primitives-at-edges / strong-types-in-Business layering and the toBus/fromBusResponse/toDB converter pattern.",
+      "category": "development",
+      "keywords": ["go", "golang", "architecture"],
+      "license": "Apache-2.0",
+      "repository": "https://github.com/ardanlabs/skills"
+    },
+    {
+      "name": "business-layer-extensions",
+      "source": "./",
+      "skills": ["./.agents/skills/business-layer-extensions"],
+      "description": "Add cross-cutting concerns (OTEL, logging, metrics, caching, auth) via the ExtBusiness/Extension decorator seam.",
+      "category": "development",
+      "keywords": ["go", "golang", "architecture", "observability"],
+      "license": "Apache-2.0",
+      "repository": "https://github.com/ardanlabs/skills"
+    },
+    {
+      "name": "branching-logic-flow",
+      "source": "./",
+      "skills": ["./.agents/skills/branching-logic-flow"],
+      "description": "Prefer defaulting and naked switches over if/else chains for shallow branching logic in Go.",
+      "category": "development",
+      "keywords": ["go", "golang", "style"],
+      "license": "Apache-2.0",
+      "repository": "https://github.com/ardanlabs/skills"
+    },
+    {
+      "name": "pr-review",
+      "source": "./",
+      "skills": ["./.agents/skills/pr-review"],
+      "description": "Read-only PR review lenses for security, feature completeness, correctness, error visibility, comments, tests, contracts, duplication, and simplification.",
+      "category": "code-review",
+      "keywords": ["review", "pull-request", "security", "go"],
+      "license": "Apache-2.0",
+      "repository": "https://github.com/ardanlabs/skills"
+    }
+  ]
+}
