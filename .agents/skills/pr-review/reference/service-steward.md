@@ -17,7 +17,7 @@ Priority order: correctness, explicit project rules, Go idioms, App ↔ Business
 
 ## Local standards
 
-AGENTS.md (and nested) is authoritative. Apply where relevant: `use-modern-go`, `layered-architecture-types`, `business-layer-extensions`, `branching-logic-flow`.
+AGENTS.md (and nested) is authoritative. Apply where relevant: `use-modern-go`, `ardan-service-architecture`.
 
 ## Patrol route
 

@@ -92,9 +92,7 @@ Paths below are **placeholders** — map each `<…>` to the target repo's actua
 All lenses treat **AGENTS.md** (and any nested AGENTS.md) as authoritative. Apply these repo skills **only to `.go` files**, where relevant:
 
 - `use-modern-go` — Go implementation style.
-- `layered-architecture-types` — primitives at edges, strong types in Business, named converters only.
-- `business-layer-extensions` — the `ExtBusiness` / `Extension` decorator seam.
-- `branching-logic-flow` — defaulting and shallow control flow.
+- `ardan-service-architecture` — primitives at edges, strong types in Business, named converters only; the `ExtBusiness` / `Extension` decorator seam; defaulting and shallow control flow.
 
 ## Diff intake
 

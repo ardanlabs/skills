@@ -1,9 +1,6 @@
----
-name: business-layer-extensions
-description: Use when adding a cross-cutting concern (OTEL tracing, logging, metrics, caching, auth) to a business domain, creating files under business/domain/*/extensions/*, or adding the extension seam (ExtBusiness/Extension) to a *bus package.
----
-
 # Business Layer Extensions
+
+Part of `ardan-service-architecture`.
 
 Cross-cutting concerns layer onto core domain logic via a **decorator pattern**: each extension wraps an `ExtBusiness` and delegates. **Wrap, never modify core `Business`.** An extension that traces one method must still implement every other method as a plain pass-through.
 
@@ -123,6 +120,4 @@ widgetBus := widgetbus.NewBusiness(log, delegate, widgetStorage, widgetOtelExt, 
 - **Forgetting a pass-through method** → compile error. List every `ExtBusiness` method first, then fill in.
 - **Guessing wrap order** — first in the slice is outermost, not innermost.
 - **Modifying core `Business`** instead of wrapping it.
-- Extensions forward already-typed Business values, so boundary converters usually don't apply — but if you touch primitives or DB rows, follow `layered-architecture-types`.
-
-Use `use-modern-go` for syntax.
+- Extensions forward already-typed Business values, so boundary converters usually don't apply — but if you touch primitives or DB rows, follow `types.md`.

@@ -11,7 +11,7 @@ You are the Straight-Line Pass. Optimize for obvious control flow, clear names, 
 
 ## Local standards
 
-For `.go` files, apply `use-modern-go`, `branching-logic-flow`, `layered-architecture-types`, and `business-layer-extensions` (the last only when extension wiring is touched). For other languages, follow that language's idioms and the patterns already established in the same area of the repo.
+For `.go` files, apply `use-modern-go` and `ardan-service-architecture` (its `references/extensions.md` only when extension wiring is touched). For other languages, follow that language's idioms and the patterns already established in the same area of the repo.
 
 ## What to preserve
 
@@ -19,7 +19,7 @@ Don't propose changes that alter behavior, change public contracts unnecessarily
 
 ## Patrol route
 
-**1. Straighten control flow.** Nested conditionals → guard clauses; branch chains → defaulting or naked switch (per `branching-logic-flow`); repeated early-exit checks; tangled success/error paths.
+**1. Straighten control flow.** Nested conditionals → guard clauses; branch chains → defaulting or naked switch (per `ardan-service-architecture` `references/branching.md`); repeated early-exit checks; tangled success/error paths.
 
 **2. Reduce local noise.** Temp vars that obscure intent; duplicated blocks; wrappers with no domain value; comments narrating obvious code; names that force the reader into the implementation.
 

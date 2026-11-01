@@ -6,18 +6,16 @@ A collection of AI skills for development work, primarily Go. Compatible with Cl
 
 | File                     | Purpose                                                                                                    |
 |--------------------------|------------------------------------------------------------------------------------------------------------|
-| [AGENTS.md](AGENTS.md)   | The agent's identity, working style, git policy, mandatory-skill triggers, and layer-conversion reference. |
+| [AGENTS.md](AGENTS.md)   | The agent's identity, working style, git policy, and mandatory-skill triggers.                             |
 | [CLAUDE.md](CLAUDE.md)   | Claude Code entry point — points at `AGENTS.md`.                                                           |
 
 ## Skills
 
-| Skill                                                                            | Purpose                                                                                                                                 |
-|----------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
-| [use-modern-go](.agents/skills/use-modern-go/SKILL.md)                           | Apply modern Go syntax based on the project's Go version.                                                                               |
-| [layered-architecture-types](.agents/skills/layered-architecture-types/SKILL.md) | Enforce primitives-at-edges / strong-types-in-Business layering and the toBus/fromBusResponse/toDB converter pattern.                   |
-| [business-layer-extensions](.agents/skills/business-layer-extensions/SKILL.md)   | Add cross-cutting concerns (OTEL, logging, metrics) via the `ExtBusiness`/`Extension` decorator seam.                                   |
-| [branching-logic-flow](.agents/skills/branching-logic-flow/SKILL.md)             | Prefer defaulting and naked switches over if/else chains for shallow branching.                                                         |
-| [pr-review](.agents/skills/pr-review/SKILL.md)                                   | Read-only PR review lenses for correctness, error visibility, comments, tests, contracts, and simplification across all repo languages. |
+| Skill                                                                            | Purpose                                                                                                                                                        |
+|----------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [use-modern-go](.agents/skills/use-modern-go/SKILL.md)                           | Apply modern Go syntax based on the project's Go version.                                                                                                      |
+| [ardan-service-architecture](.agents/skills/ardan-service-architecture/SKILL.md) | Service layering (primitives at edges, strong types in Business, named converters), the `ExtBusiness`/`Extension` decorator seam, and default-first branching. |
+| [pr-review](.agents/skills/pr-review/SKILL.md)                                   | Read-only PR review lenses for correctness, error visibility, comments, tests, contracts, and simplification across all repo languages.                        |
 
 ## Install as a Claude Code plugin
 
@@ -29,7 +27,7 @@ This repo is a [Claude Code plugin marketplace](https://code.claude.com/docs/en/
 /reload-plugins
 ```
 
-Available plugins: `use-modern-go`, `layered-architecture-types`, `business-layer-extensions`, `branching-logic-flow`, `pr-review`.
+Available plugins: `use-modern-go`, `ardan-service-architecture`, `pr-review`.
 
 Plugin skills are namespaced, so `pr-review` is invoked as `/pr-review:pr-review`. Pull newer versions with `/plugin marketplace update ardanlabs` — plugins are unpinned, so every commit to `main` is a new version.
 

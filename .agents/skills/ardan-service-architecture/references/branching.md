@@ -1,9 +1,6 @@
----
-name: branching-logic-flow
-description: Prefer defaulting and naked switches over if/else chains for shallow branching logic in Go. Use when writing or refactoring conditional logic with 1-3 branches.
----
-
 # Branching Logic Flow
+
+Part of `ardan-service-architecture`.
 
 For shallow branching (1–3 cases), prefer **defaulting** or **naked switches** over if/else chains — less nesting, no duplication, lower cognitive load.
 
@@ -69,8 +66,3 @@ For simple two-way numeric comparison, prefer `min`/`max`: `result := max(a, b)`
 - Nesting >3 levels — extract a function instead.
 - Defaulting would mask a bug that should surface explicitly.
 
-## Related modern Go
-
-- `maps.Copy(dst, src)` over manual copy loops (dst must be non-nil).
-- `cmp.Or(a, b, "default")` for first non-zero across fallbacks.
-- Two-value form `v, ok := x.(T)` for type assertions.

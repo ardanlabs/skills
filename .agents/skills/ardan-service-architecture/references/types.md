@@ -1,27 +1,11 @@
----
-name: layered-architecture-types
-description: Enforce primitive-at-edges / strong-types-in-Business layering and the toBus/fromBusResponse/toDB converter pattern. Use when writing, editing, or auditing Go files under app/*, business/domain/*, or .../stores/*db.
----
+# Type Boundaries
 
-# Layered Architecture Types
-
-Data crosses three layers. **Primitives live at the edges (API JSON, DB rows); strong types from `business/types` live only in Business.** Every crossing goes through a named converter — never assign across a boundary directly, and never let a strong type appear in an API request/response struct or a DB row struct.
-
-```
-API (app/*)            Business (business/domain/*)        Storage (.../stores/*db)
-primitive types  ──►   strong types (business/types/*)    ──►   native DB types
-request struct    toBus<Type>          model type        toDB<Type>     db<Type> row
-response struct   ◄── fromBus<Type>Response   ◄── toBus<Type>  ◄──
-                      (App layer)                  (Storage layer)
-```
-
-**Apply when** writing/editing/auditing API request/response types (`app/*`), Business models (`business/domain/*/model.go`), or DB rows and store code (`.../stores/*db`).
+Part of `ardan-service-architecture`. Its SKILL.md holds the layer diagram, the converter table, the import rules, and the type-confirmation rule; this file adds the detail.
 
 ## User controls the types (MUST)
 
 The user owns every type choice here — field types, DB column representations, converter signatures, wrappers.
 
-- Before finalizing (commit or review summary), state the concrete types at each affected boundary (request/response field, DB row field, converter return) and get explicit confirmation. Don't finalize on an assumed default.
 - **Suggest existing types first** — a `business/types/*` strong type for Business, or a type already defined locally. Propose a new type only when nothing fits, and say why.
 - Call out decisions: pointer vs value, `sql.Null*` vs wrapper, `json.RawMessage` vs typed struct, NULL/empty representation.
 - If the user picks a type that diverges from these patterns, follow it and adapt the converters.
@@ -31,13 +15,6 @@ The user owns every type choice here — field types, DB column representations,
 - **API request/response** (`app/*`): primitives only — `string`, `int`, `bool`, `json.RawMessage`, `time.Time`, and slices/structs of these. Never a `business/types/*` strong type.
 - **Business models** (`business/domain/*/model.go`): strong types for IDs, enums, classifications.
 - **DB rows** (`.../stores/*db`): native/SQL types only — `string`, `sql.Null*`, `json.RawMessage`, `time.Time`. Never a strong type, **including validated enums — store as `string`.**
-
-## Package imports (MUST)
-
-- **No cross-domain Business imports:** `business/domain/<x>bus` must not import `.../<y>bus`. Compose across domains in the App layer.
-- **No cross-domain App imports:** `app/domain/<x>app` must not import `.../<y>app`.
-- **An App package may import several Business domain packages** — this is the intended place to combine domains.
-- `business/types/*` and `foundation/*` are shared leaf packages: any layer may import them; they must not import App or Business domain packages.
 
 ## Foundation types are wrapped, not used directly (MUST)
 
@@ -55,16 +32,7 @@ Prefer non-pointer types at every layer. Reach for a pointer only when nothing e
 - Don't add a pointer field/param/return to signal optionality when a zero value, `sql.Null*`, or explicit "is set" flag does the job.
 - If a pointer genuinely is the only option, surface it in the type confirmation before writing it.
 
-## Converter functions (MUST exist per type, both directions)
-
-| Direction          | Layer pair         | Name                    | Returns                                                                 |
-|--------------------|--------------------|-------------------------|-------------------------------------------------------------------------|
-| primitive → strong | App → Business     | `toBus<Type>`           | `(busInput, error)` — parse + validate, accumulate `errs.FieldErrors`   |
-| strong → primitive | Business → App     | `fromBus<Type>Response` | response struct — convert each strong field with `.String()` etc.       |
-| strong → native    | Business → Storage | `toDB<Type>`            | db row struct                                                           |
-| native → strong    | Storage → Business | `toBus<Type>`           | `(busType, error)` — parse via the relevant `business/types/*` `Parse*` |
-
-Rules:
+## Converter rules (MUST)
 
 - **All parsing/validation happens in App-layer `toBus<Type>`.** Parse each primitive into its strong type; on failure `fieldErrors.Add(field, err)` and return `errs.FieldErrors`. The request struct carries only strings — no strong types, no strong-type validation there.
 - `fromBus<Type>Response` converts explicitly (`id.String()`, `cls.String()`). Never rely on a strong type's `MarshalJSON` to hide a leak — the response field must already be primitive.
@@ -155,8 +123,3 @@ Names above are illustrative — not real codebase symbols.
 - [ ] No `foundation/*` type appears directly in an aggregate or model; each wrapped via `toFoundation`/`fromFoundation`.
 - [ ] User confirmed concrete types at each boundary before finalizing.
 
-## When NOT to apply
-
-- Internal helpers that never cross a boundary.
-- Foundation packages and `business/types/*` themselves.
-- Pure intra-package refactors that don't move data between layers.

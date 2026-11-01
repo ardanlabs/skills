@@ -30,22 +30,11 @@
 Always apply these skills when doing feature work; do not rely on memory:
 
 - `use-modern-go` — whenever writing or editing any Go code.
-- `branching-logic-flow` — when writing/refactoring conditional or branching logic in Go (default-first assignment, naked switches over if/else ladders).
-- `layered-architecture-types` — before writing, editing, or auditing any `app/*`, `business/domain/*`, or `.../stores/*db` Go file. Holds the App ↔ Business ↔ Storage type-boundary rules below.
-- `business-layer-extensions` — before adding a cross-cutting concern (OTEL, logging, metrics, caching, auth), creating files under `business/domain/*/extensions/*`, or adding the `ExtBusiness`/`Extension` seam to a `*bus` package.
+- `ardan-service-architecture` — before writing, editing, or auditing any `app/*`, `business/domain/*` (including `extensions/*`), or `.../stores/*db` Go file; before adding a cross-cutting concern (OTEL, logging, metrics, caching, auth) or the `ExtBusiness`/`Extension` seam to a `*bus` package; and when writing/refactoring conditional or branching logic in Go. Holds the App ↔ Business ↔ Storage type-boundary and converter rules.
 
 ## Reviewing a PR
 
 - `pr-review` — for any PR / diff / pre-commit review. It runs a guided review: asks for missing inputs (diff scope, issue-tracker URL, issue id), reviews the diff against the ticket's acceptance criteria, and writes auto-numbered findings and Mermaid diagrams under `.reviews/<issue-id>/`.
-
-### Layer conversions (from `layered-architecture-types`)
-
-Primitives live at the edges (API JSON structs, DB row structs); strong types (`business/types/*`) live only in the Business layer. Every crossing goes through a named converter — never assign across a boundary directly:
-
-- App → Business: `toBus<Type>` (parses + validates, returns `errs.FieldErrors`)
-- Business → App: `fromBus<Type>Response` (strong → primitive, explicit)
-- Business → Storage: `toDB<Type>`
-- Storage → Business: `toBus<Type>` (native → strong, returns error)
 
 ## Verifying code
 
