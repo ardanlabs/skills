@@ -119,8 +119,8 @@ Names above are illustrative — not real codebase symbols.
 - [ ] Constructors named `Parse<Type>` / `MustParse<Type>`, not `New*` (unless user-justified).
 - [ ] No pointer introduced where a value, `sql.Null*`, or "is set" flag would do.
 - [ ] Reused an existing `business/types/*` or local type where one fit.
-- [ ] No cross-domain Business, store, or App imports; no store reads, writes, or joins another domain's tables.
-- [ ] Cross-domain work lives in a user-confirmed coordinator (App, `business/composite/<x>bus`, or other) that uses only `*bus` APIs and owns any cross-domain transaction.
+- [ ] No package outside domain `<y>` imports `<y>`'s store; no store reads, writes, or joins another domain's tables; no cross-domain App imports.
+- [ ] Cross-domain transactions are begun by the App layer and passed down with `NewWithTx(tx)`, including to every `*bus` a tx-bound `*bus` depends on.
 - [ ] Any view joining several domains' tables is owned by a read-only `business/composite/<x>bus` that only queries it.
 - [ ] No `foundation/*` type appears directly in an aggregate or model; each wrapped via `toFoundation`/`fromFoundation`.
 - [ ] User confirmed concrete types at each boundary before finalizing.
