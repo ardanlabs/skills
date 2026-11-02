@@ -28,8 +28,12 @@ if (-not $ver) { $f = Find-Up $start 'go.work'; if ($f) { $ver = Get-GoVersion $
 if (-not $ver) {
     $inGit = $false
     if (Get-Command git -ErrorAction SilentlyContinue) {
+        # git prints UTF-8; the console code page would garble non-ASCII paths.
+        $enc = [Console]::OutputEncoding
+        try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) } catch {}
         $rel = @(git -C $start -c core.quotePath=false ls-files go.mod '*/go.mod' 2>$null)
         $inGit = $LASTEXITCODE -eq 0
+        try { [Console]::OutputEncoding = $enc } catch {}
     }
     if (-not $inGit) {
         $prefix = $start.TrimEnd('\', '/').Length + 1

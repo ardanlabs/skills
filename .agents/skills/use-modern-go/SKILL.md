@@ -8,7 +8,7 @@ description: Apply modern Go syntax guidelines based on the project's Go version
 Before writing Go, run on the file/dir being edited (`<skill>` = this file's dir):
 
 - sh: `sh <skill>/scripts/guidelines.sh <path>`
-- PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File <skill>/scripts/guidelines.ps1 <path>`
+- PowerShell: `pwsh -NoProfile -ExecutionPolicy Bypass -File <skill>/scripts/guidelines.ps1 <path>` (no `pwsh`: use `powershell`, Windows PowerShell 5.1)
 
 It prints `go 1.XX` + the guidelines for that version. Read all of it, unfiltered. Never detect the version yourself; re-run per module.
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Usage: sh guidelines.sh [--go X.Y] [PATH]  -> "go X.Y" + matching ../references/features.txt lines.
 # Version: --go; nearest go.mod up (no go line: 1.16); nearest go.work (1.18); lowest go.mod
-# below PATH (git-tracked, else find; skips testdata/vendor); else "go unknown". No Go needed.
+# below PATH (git-tracked, else find; skips testdata/vendor/node_modules); else "go unknown". No Go needed.
 
 data="$(cd -- "$(dirname -- "$0")/../references" 2>/dev/null && pwd)/features.txt"
 
@@ -40,7 +40,7 @@ findup() {
 [ -n "$ver" ] || ver=$(
   { git -c core.quotePath=false ls-files go.mod '*/go.mod' 2>/dev/null ||
       find . \( -name .git -o -name node_modules \) -prune -o -name go.mod -print; } |
-    grep -Ev '(^|/)(testdata|vendor)/' | tr '\n' '\0' |
+    grep -Ev '(^|/)(testdata|vendor|node_modules)/' | tr '\n' '\0' |
     xargs -0 awk '$1 == "go" { split($2, v, "."); print v[1] "." v[2] + 0; nextfile }' 2>/dev/null |
     sort -t. -k1,1n -k2,2n | head -n 1
 )
