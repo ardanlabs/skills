@@ -4,6 +4,8 @@ Review new or changed data shapes: do they make valid states easy, invalid state
 
 Primary duty: the type-boundary rule. API request/response structs use primitives; DB rows use primitive/native DB shapes; Business uses `business/types/*` strong types; every crossing goes through a named converter; nothing is assigned directly across App ↔ Business ↔ Storage. When the diff touches `app/*`, `business/domain/*`, or stores, apply `ardan-service-architecture` (`references/types.md`).
 
+Mechanical evidence in `checks/`: `apidiff` (incompatible exported Go API changes against the base commit) and `buf-breaking` / `buf-lint` (proto wire and style). An `apidiff` or `buf-breaking` hit the ticket doesn't call for is G3 (G4 for a wire break on a published proto); cite the log line.
+
 ## Language lens
 
 - **Go** — exported vs unexported fields, constructors and their validation, zero-value meaning, pointer vs value receivers, mutators that keep invariants, small consumer-owned interfaces, needless interfaces/generics, aliases that erase meaning, converter naming and validation, errors for invalid construction.

@@ -28,7 +28,10 @@ function ReadTsv([string]$path) { if (Test-Path -LiteralPath $path) { @([IO.File
 $ctxItem = Get-Item -LiteralPath (Join-Path $RunDir 'context') -ErrorAction SilentlyContinue
 if (-not $ctxItem) { Die "no context in $RunDir (run intake first)" }
 $ctx = $ctxItem.FullName
-$root = ([IO.File]::ReadAllLines((Join-Path $ctx 'scope.txt')) | Where-Object { $_.StartsWith('root=') } | Select-Object -First 1).Substring(5)
+$scopeLines = [IO.File]::ReadAllLines((Join-Path $ctx 'scope.txt'))
+$root = ($scopeLines | Where-Object { $_.StartsWith('root=') } | Select-Object -First 1).Substring(5)
+$baseLine = $scopeLines | Where-Object { $_.StartsWith('base=') } | Select-Object -First 1
+$baseSha = if ($baseLine) { $baseLine.Substring(5) } else { '' }
 if (-not (Test-Path -LiteralPath $root -PathType Container)) { Die "cannot enter repo root $root" }
 Set-Location -LiteralPath $root
 $out = Join-Path $ctx 'checks'
@@ -68,13 +71,85 @@ $runner = {
 function Job([string]$name, [string]$dir, [string]$exe, [string[]]$a, [string[]]$stdin = @()) {
     $jobs.Add((Start-Job -ScriptBlock $runner -ArgumentList $dir, (Join-Path $out "$name.txt"), $exe, $a, $stdin))
 }
+# JobFn NAME DIR TITLE FN ARGS: run scriptblock FN in DIR as a job; FN gets a state hashtable
+# first (set .rc for the exit code), then ARGS. Its output is the log.
+$fnRunner = {
+    param([string]$dir, [string]$log, [string]$title, [string]$code, [object[]]$a)
+    Set-Location -LiteralPath $dir
+    $enc = [Text.UTF8Encoding]::new($false)
+    $st = @{ rc = 0 }
+    try { $res = & ([scriptblock]::Create($code)) $st @a 2>&1 } catch { $res = @("$_"); $st.rc = 127 }
+    $body = (@($res) | ForEach-Object { "$_" }) -join "`n"
+    if ($body) { $body += "`n" }
+    [IO.File]::WriteAllText($log, "# cmd: $title`n" + $body, $enc)
+    [IO.File]::WriteAllText(($log -replace '\.txt$', '.exit'), "$($st.rc)", $enc)
+}
+function JobFn([string]$name, [string]$dir, [string]$title, [scriptblock]$fn, [object[]]$a) {
+    $jobs.Add((Start-Job -ScriptBlock $fnRunner -ArgumentList $dir, (Join-Path $out "$name.txt"), $title, $fn.ToString(), $a))
+}
 function Skip([string]$name, [string]$why) {
     Out-Text (Join-Path $out "$name.txt") "# skipped: $why`n"
     Out-Text (Join-Path $out "$name.exit") 'skip'
 }
 
-# --- Go, per module ------------------------------------------------------------------
+$files = @(ReadTsv (Join-Path $ctx 'files.tsv'))
+function Live([string]$lang) { @($files | Where-Object { $_[0] -ne 'D' -and ($lang -eq '*' -or $_[3] -ceq $lang) } | ForEach-Object { $_[6] }) }
+
+# --- base tree (apidiff, buf breaking) ---------------------------------------------------
+# The base commit's files, extracted outside the repo with git archive: nothing is written
+# to the working tree or .git. Removed once the checks finish.
 $pk = @(ReadTsv (Join-Path $ctx 'packages.tsv'))
+$protos = @(Live 'proto')
+$bufCfg = (Test-Path -LiteralPath 'buf.yaml') -or (Test-Path -LiteralPath 'buf.work.yaml')
+$baseSrc = ''
+if ($baseSha -and (($pk.Count -and (Has 'apidiff')) -or ($protos.Count -and $bufCfg -and (Has 'buf')))) {
+    $baseSrc = Join-Path ([IO.Path]::GetTempPath()) ('checks-base-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $baseSrc | Out-Null
+    $tar = "$baseSrc.tar"
+    & git archive -o $tar $baseSha 2>$null
+    if ($LASTEXITCODE -eq 0) { & tar -x -f $tar -C $baseSrc 2>$null }
+    if ($LASTEXITCODE -ne 0) { Remove-Item -LiteralPath $baseSrc -Recurse -Force -ErrorAction SilentlyContinue; $baseSrc = '' }
+    Remove-Item -LiteralPath $tar -Force -ErrorAction SilentlyContinue
+}
+
+# Incompatible exported-API changes of each package against the base tree. Runs in the head
+# module directory. New, main, and internal packages are skipped.
+$apidiffFn = {
+    param($st, [string]$m, [string]$baseSrc, [string[]]$pkgs)
+    $bmod = Join-Path $baseSrc $m
+    foreach ($p in $pkgs) {
+        if (-not (Test-Path -LiteralPath (Join-Path $bmod $p) -PathType Container)) { continue }
+        $ip = ((& go list -f '{{if ne .Name "main"}}{{.ImportPath}}{{end}}' $p 2>$null) -join '').Trim()
+        if (-not $ip -or $ip -cmatch '(^|/)internal(/|$)') { continue }
+        $ex = Join-Path $baseSrc ('apidiff-' + ($ip -creplace '/', '_') + '.export')
+        Push-Location -LiteralPath $bmod
+        $err = @(& apidiff -w $ex $ip 2>&1); $rc = $LASTEXITCODE
+        Pop-Location
+        if ($rc -ne 0) { "## ${ip}: base export failed"; $err | Select-Object -First 5 | ForEach-Object { "$_" }; continue }
+        $res = @(& apidiff -incompatible $ex $ip 2>&1 | ForEach-Object { "$_" })
+        if ($res.Count) { "## $ip"; $res }
+    }
+}
+
+# Unreachable functions (tests count as roots) in the changed files of this module.
+$deadcodeFn = {
+    param($st, [string]$pre, [string]$filesTsv)
+    $res = @(& deadcode -test ./... 2>&1 | ForEach-Object { "$_" })
+    if ($LASTEXITCODE -ne 0) {
+        if ($res -cmatch 'no main packages') { return '# no main or test packages: nothing to analyze' }
+        $st.rc = $LASTEXITCODE; return $res
+    }
+    $ch = @{}
+    foreach ($l in [IO.File]::ReadAllLines($filesTsv)) { $f = $l -split "`t"; if ($f.Count -ge 7 -and $f[0] -ne 'D') { $ch[$f[6]] = $true } }
+    foreach ($ln in $res) {
+        $p = (($ln -creplace ':\d+:\d+: .*$', '') -replace '\\', '/') -creplace '^\./', ''
+        if ($ch.ContainsKey("$pre$p") -or $ch.ContainsKey($p)) { $ln }
+    }
+}
+
+# --- Go, per module ------------------------------------------------------------------
+$goVer = $null
+if ((((& go env GOVERSION 2>$null) -join '')) -cmatch '^go(\d+)\.(\d+)') { $goVer = [version]"$($Matches[1]).$($Matches[2])" }
 $modules = @($pk | ForEach-Object { $_[0] } | Select-Object -Unique)
 foreach ($m in $modules) {
     $sfx = if ($modules.Count -gt 1) { '@' + ($m -creplace '/', '_') } else { '' }
@@ -92,19 +167,48 @@ foreach ($m in $modules) {
     Job "go-vet$sfx" $dir 'go' (@('vet') + $pkgs)
     if (-not $tests) { Skip "go-test$sfx" '--no-tests' }
     elseif (-not $testPkgs.Count) { Skip "go-test$sfx" 'all changed packages excluded' }
-    else { Job "go-test$sfx" $dir 'go' (@('test', '-count=1', '-timeout', $Timeout) + $testPkgs) }
+    else { Job "go-test$sfx" $dir 'go' (@('test', '-race', '-count=1', '-timeout', $Timeout) + $testPkgs) }
     $golangciCfg = @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -cmatch '^\.golangci\.(ya?ml|toml|json)$' })
-    if ((Has 'golangci-lint') -and $golangciCfg.Count) { Job "golangci-lint$sfx" $dir 'golangci-lint' (@('run') + $pkgs) }
-    elseif (Has 'staticcheck') { Job "staticcheck$sfx" $dir 'staticcheck' $pkgs }
-    else { Skip "staticcheck$sfx" 'staticcheck/golangci-lint not installed' }
+    if ($golangciCfg.Count) {
+        if (Has 'golangci-lint') { Job "golangci-lint$sfx" $dir 'golangci-lint' (@('run') + $pkgs) }
+        else { Skip "golangci-lint$sfx" 'golangci-lint not installed' }
+    }
+    if (Has 'staticcheck') { Job "staticcheck$sfx" $dir 'staticcheck' $pkgs } else { Skip "staticcheck$sfx" 'staticcheck not installed' }
+    if (Has 'checklocks') { Job "checklocks$sfx" $dir 'go' (@('vet', "-vettool=$($tools['checklocks'])") + $pkgs) }
+    else { Skip "checklocks$sfx" 'checklocks not installed' }
+    if (Has 'errcheck') { Job "errcheck$sfx" $dir 'errcheck' $pkgs } else { Skip "errcheck$sfx" 'errcheck not installed' }
+    if (Has 'nilaway') {
+        $modLine = [IO.File]::ReadAllLines((Join-Path $dir 'go.mod')) | Where-Object { $_ -cmatch '^\s*module\s' } | Select-Object -First 1
+        $modPath = (($modLine -creplace '^\s*module\s+', '') -creplace '"', '').Trim()
+        Job "nilaway$sfx" $dir 'nilaway' (@('-pretty-print=false', "-include-pkgs=$modPath") + $pkgs)
+    } else { Skip "nilaway$sfx" 'nilaway not installed' }
+    $pre = if ($m -eq '.') { '' } else { "$m/" }
+    if (Has 'deadcode') { JobFn "deadcode$sfx" $dir "deadcode_changed $m" $deadcodeFn @($pre, (Join-Path $ctx 'files.tsv')) }
+    else { Skip "deadcode$sfx" 'deadcode not installed' }
+    if (-not (Has 'apidiff')) { Skip "apidiff$sfx" 'apidiff not installed' }
+    elseif (-not $baseSrc) { Skip "apidiff$sfx" 'base commit not available locally' }
+    else { JobFn "apidiff$sfx" $dir "apidiff_pkgs $m $($pkgs -join ' ')" $apidiffFn @($m, $baseSrc, [string[]]$pkgs) }
+    if ($goVer -and $goVer -ge [version]'1.26') { Job "go-fix$sfx" $dir 'go' (@('fix', '-diff') + $pkgs) }
+    else { Skip "go-fix$sfx" 'go fix modernizers need Go 1.26+' }
+    Job "go-mod-tidy$sfx" $dir 'go' @('mod', 'tidy', '-diff')
     if (Has 'gosec') { Job "gosec$sfx" $dir 'gosec' (@('-quiet') + $pkgs) } else { Skip "gosec$sfx" 'gosec not installed' }
     if (Has 'govulncheck') { Job "govulncheck$sfx" $dir 'govulncheck' $pkgs } else { Skip "govulncheck$sfx" 'govulncheck not installed' }
     if (Has 'dupl') { Job "dupl$sfx" $dir 'dupl' (@('-t', '50', '-plumbing') + $pkgs) } else { Skip "dupl$sfx" 'dupl not installed' }
 }
 
 # --- changed files by language -------------------------------------------------------
-$files = @(ReadTsv (Join-Path $ctx 'files.tsv'))
-function Live([string]$lang) { @($files | Where-Object { $_[0] -ne 'D' -and ($lang -eq '*' -or $_[3] -ceq $lang) } | ForEach-Object { $_[6] }) }
+$goFiles = @(Live 'go')
+if ($goFiles.Count -and (Has 'go')) { Job 'gofmt' $root 'gofmt' (@('-l') + $goFiles) }
+
+if ($protos.Count) {
+    if (-not $bufCfg) { Skip 'buf-lint' 'no buf.yaml/buf.work.yaml at the repo root' }
+    elseif (-not (Has 'buf')) { Skip 'buf-lint' 'buf not installed' }
+    else {
+        Job 'buf-lint' $root 'buf' (@('lint') + @($protos | ForEach-Object { '--path'; $_ }))
+        if ($baseSrc) { Job 'buf-breaking' $root 'buf' @('breaking', '--against', $baseSrc) }
+        else { Skip 'buf-breaking' 'base commit not available locally' }
+    }
+}
 
 $sh = @(Live 'sh')
 if ($sh.Count) {
@@ -130,6 +234,7 @@ $semcfg = @('.semgrep.yml', '.semgrep.yaml', '.semgrep') | Where-Object { Test-P
 if ((Has 'semgrep') -and $semcfg) { Job 'semgrep' $root 'semgrep' (@('scan', '--metrics=off', '--config', $semcfg) + @(Live '*')) }
 
 if ($jobs.Count) { $jobs | Wait-Job | Out-Null; $jobs | Receive-Job -ErrorAction SilentlyContinue | Out-Null; $jobs | Remove-Job }
+if ($baseSrc) { Remove-Item -LiteralPath $baseSrc -Recurse -Force -ErrorAction SilentlyContinue }
 
 # --- summary ----------------------------------------------------------------------------
 $rows = New-Object System.Collections.Generic.List[string]
@@ -141,7 +246,8 @@ foreach ($nm in $names) {
     $s = switch ($e) { 'skip' { 'skipped' } '0' { 'pass' } default { 'fail' } }
     $log = Join-Path $out "$n.txt"
     $lines = 0; foreach ($x in [IO.File]::ReadLines($log)) { $lines++ }
-    if ($n -cmatch '^dupl' -and $lines -gt 1) { $s = 'findings' }
+    # These exit 0 and report through output: any line not starting with "#" is a hit.
+    if ($n -cmatch '^(dupl|gofmt$|deadcode|apidiff)' -and $s -eq 'pass' -and @([IO.File]::ReadLines($log) | Where-Object { $_ -cmatch '^[^#]' }).Count) { $s = 'findings' }
     $rows.Add("$n`t$s`t$e`t$lines`tchecks/$n.txt")
     Remove-Item -LiteralPath $f
 }

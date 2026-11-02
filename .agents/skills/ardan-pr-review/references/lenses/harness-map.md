@@ -2,7 +2,7 @@
 
 Would the tests fail for the bugs this diff is most likely to introduce? Judge by regression value, not coverage percentage; skip trivial accessors.
 
-**Tests already ran** — see `checks/summary.tsv`, the `go-test*` logs, and `checks/setup.txt`. A failing or timed-out test in a changed package is a finding, or an Open check when it's environmental (say why). Don't re-run the suite; one `go test -run` to prove a point is fine.
+**Tests already ran** — see `checks/summary.tsv`, the `go-test*` logs, and `checks/setup.txt`. A failing or timed-out test in a changed package is a finding, or an Open check when it's environmental (say why). Tests run with `-race`: a `WARNING: DATA RACE` whose stack touches changed code is G4 — quote the two conflicting stack frames. Don't re-run the suite; one `go test -run` to prove a point is fine.
 
 ## Language lens
 

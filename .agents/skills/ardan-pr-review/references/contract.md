@@ -13,7 +13,7 @@ Every review agent follows this file plus its lens checklists. `<run>` and `<ski
 | `refs.tsv`                        | `symbol path:line` — word-match references to each changed symbol (capped, `+N more`). A starting list; confirm with `gopls`. |
 | `diff.patch`                      | The diff (8 context lines). Find `diff --git a/<path>` and read only the sections you need.             |
 | `shards.tsv`                      | `shard path`, large diffs only. With a shard in your prompt, review only its files.                    |
-| `checks/summary.tsv`              | Build, vet, tests, linters, scanners, clone detectors — already run. Open a log only when its row matters. |
+| `checks/summary.tsv`              | Build, vet, tests (`-race`), linters, analyzers, scanners, clone detectors — already run. Status `pass`, `fail`, `findings` (hits reported on output), or `skipped`. Open a log only when its row matters. Package-wide tools (staticcheck, errcheck, nilaway, checklocks, gosec) report on whole packages: only hits on code the diff changed, or whose behavior it changed, are findings. |
 | `ticket.md`, `pr.md`, `commits.txt` | Ticket, PR description, commit messages (whichever exist).                                          |
 | `rules.txt`                       | `AGENTS.md`/`CLAUDE.md` files governing the changed paths; the brief digests them.                     |
 | `skipped.tsv`                     | Generated and vendored files. Never reviewed; never read `generated.patch`.                            |

@@ -4,7 +4,7 @@
 #                     [--reviews-dir DIR] [--dry-run]
 # Resolves the review scope in the current git repo and writes the run directory
 # <reviews-dir>/<id>/<NNN>/context/ (default .reviews at the repo root) (diff, file inventory, symbols, routing signals,
-# shards, packages, tools, rules, size warnings). Default scope: unstaged changes +
+# shards, packages, tools, missing tools, rules, size warnings). Default scope: unstaged changes +
 # untracked files. --exclude drops paths from the scope (git pathspec; repeatable).
 # Size guard: flags files with > --max-file-diff changed lines (800), files agents must
 # read with > --max-file-lines lines (2000), noise (generated/vendor/lockfiles) and PRs
@@ -72,6 +72,9 @@ excluded() {
   }
 }
 
+# basesha: the commit the diff is taken against (apidiff, buf breaking); empty when the PR
+# base is not available locally.
+basesha=$head
 case $scope in
   unstaged)
     git_diff >"$patch"
@@ -87,6 +90,7 @@ case $scope in
     ;;
   base)
     git rev-parse --verify -q "$base^{commit}" >/dev/null || die 2 "unknown base ref: $base"
+    basesha=$(git merge-base "$base" HEAD) || die 2 "no merge base between $base and HEAD"
     git_diff "$base...HEAD" >"$patch"
     git log --no-color --format='%h %s%n%b' "$base..HEAD" >"$ctx/commits.txt"
     desc="$base...HEAD"
@@ -96,6 +100,7 @@ case $scope in
     [ -n "$a" ] && [ -n "$b" ] && [ "$a" != "$range" ] || die 2 "--range must be A..B"
     bsha=$(git rev-parse --verify -q "$b^{commit}") || die 2 "unknown ref: $b"
     [ "$bsha" = "$head" ] || die 3 "range end $b is not HEAD; check out $b so checks run on the reviewed code"
+    basesha=$(git rev-parse --verify -q "$a^{commit}") || die 2 "unknown ref: $a"
     git_diff "$range" >"$patch"
     git log --no-color --format='%h %s%n%b' "$range" >"$ctx/commits.txt"
     desc="$range"
@@ -110,8 +115,10 @@ case $scope in
     if git cat-file -e "$2^{commit}" 2>/dev/null; then
       mb=$(git merge-base "$2" HEAD) && git_diff "$mb...HEAD" >"$patch" &&
         git log --no-color --format='%h %s%n%b' "$mb..HEAD" >"$ctx/commits.txt"
+      basesha=${mb-}
     else
       [ -z "$excl" ] || die 2 "--exclude needs the PR base commit locally (git fetch it first)"
+      basesha=''
       gh pr diff "$pr" --color=never >"$patch"
     fi
     gh pr view "$pr" --json title,body,url --jq '"# "+.title+"\n\n"+.url+"\n\n"+.body' >"$ctx/pr.md" 2>/dev/null
@@ -435,11 +442,71 @@ git -c core.quotePath=false ls-files 'AGENTS.md' '*/AGENTS.md' 'CLAUDE.md' '*/CL
       for (f in p) if (index(f, d) == 1) { print; next } }' "$ctx/files.tsv" - >"$ctx/rules.txt"
 
 # --- tools ----------------------------------------------------------------------
-for t in git gh go gopls staticcheck golangci-lint gosec govulncheck dupl gitleaks trufflehog \
-  detect-secrets semgrep osv-scanner trivy grype jscpd pmd ast-grep rg shellcheck node npm pnpm yarn \
-  opa conftest buf sqlfluff helm kubectl terraform tflint hadolint; do
+for t in git gh go gopls staticcheck golangci-lint gosec govulncheck dupl checklocks errcheck nilaway \
+  deadcode apidiff gitleaks trufflehog detect-secrets semgrep osv-scanner trivy grype jscpd pmd ast-grep \
+  rg shellcheck node npm pnpm yarn opa conftest buf sqlfluff helm kubectl terraform tflint hadolint; do
   p=$(command -v "$t" 2>/dev/null) && printf '%s\t%s\n' "$t" "$p"
 done >"$ctx/tools.tsv"
+
+# --- missing.tsv: tool needed_for fix ---------------------------------------------
+# Tools this change needs but that are absent, or Go tools built with an older Go
+# release than the active toolchain (analyzers built that way fail on the newer
+# standard library). Checks skip what is missing; the user is told how to install it.
+has_tool() { grep -q "^$1	" "$ctx/tools.tsv"; }
+live_lang() { awk -F '\t' -v l="$1" '$1 != "D" && $4 == l { f = 1; exit } END { exit !f }' "$ctx/files.tsv"; }
+gominor() { sed -n 's/.*go\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1; }
+gocur=''
+has_tool go && gocur=$(go env GOVERSION 2>/dev/null | gominor)
+need() {  # need TOOL NEEDED_FOR INSTALL [go]: record TOOL if missing (or stale, for Go tools)
+  if ! has_tool "$1"; then
+    printf '%s\t%s\t%s\n' "$1" "$2" "$3"
+  elif [ "${4-}" = go ] && [ -n "$gocur" ]; then
+    built=$(go version "$(command -v "$1")" 2>/dev/null | gominor)
+    if [ -n "$built" ] && [ "$built" != "$gocur" ] &&
+      [ "$(printf '%s\n%s\n' "$built" "$gocur" | sort -t . -k1,1n -k2,2n | head -n 1)" = "$built" ]; then
+      printf '%s\t%s (built with go%s, toolchain is go%s: rebuild)\t%s\n' "$1" "$2" "$built" "$gocur" "$3"
+    fi
+  fi
+}
+{
+  if [ -s "$ctx/packages.tsv" ]; then
+    need go "build, vet, tests" "https://go.dev/dl/"
+    if has_tool go && [ "$(go env CGO_ENABLED 2>/dev/null)" != 1 ]; then
+      printf 'cgo\tgo test -race (CGO_ENABLED=0)\tinstall a C compiler (clang/gcc) and set CGO_ENABLED=1\n'
+    fi
+    need gopls "symbol lookups by reviewers" "go install golang.org/x/tools/gopls@latest" go
+    need staticcheck "staticcheck" "go install honnef.co/go/tools/cmd/staticcheck@latest" go
+    cut -f1 "$ctx/packages.tsv" | sort -u | while IFS= read -r m; do
+      if ls "$m"/.golangci.y*ml "$m"/.golangci.toml "$m"/.golangci.json >/dev/null 2>&1; then
+        need golangci-lint "repo golangci-lint config" \
+          "go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest" go
+        break
+      fi
+    done
+    need gosec "Go security scan" "go install github.com/securego/gosec/v2/cmd/gosec@latest" go
+    need govulncheck "Go vulnerability scan" "go install golang.org/x/vuln/cmd/govulncheck@latest" go
+    need dupl "Go clone detection" "go install github.com/mibk/dupl@latest" go
+    need checklocks "lock annotations (+checklocks)" \
+      "go install gvisor.dev/gvisor/tools/checklocks/cmd/checklocks@go" go
+    need errcheck "unchecked errors" "go install github.com/kisielk/errcheck@latest" go
+    need nilaway "nil dereferences" "go install go.uber.org/nilaway/cmd/nilaway@latest" go
+    need deadcode "unreachable functions" "go install golang.org/x/tools/cmd/deadcode@latest" go
+    need apidiff "exported API breaks" "go install golang.org/x/exp/cmd/apidiff@latest" go
+  fi
+  if live_lang proto && { [ -f buf.yaml ] || [ -f buf.work.yaml ]; }; then
+    need buf "proto lint and breaking changes" "go install github.com/bufbuild/buf/cmd/buf@latest"
+  fi
+  if live_lang sh; then
+    need shellcheck "shell lint" "https://github.com/koalaman/shellcheck#installing"
+  fi
+  if live_lang js || live_lang ts || live_lang vue; then
+    need jscpd "JS/TS clone detection" "npm install -g jscpd"
+  fi
+  has_tool trufflehog || need gitleaks "secret scan" "go install github.com/zricethezav/gitleaks/v8@latest"
+  if ls .semgrep.yml .semgrep.yaml .semgrep >/dev/null 2>&1; then
+    need semgrep "repo semgrep rules" "python3 -m pip install semgrep"
+  fi
+} >"$ctx/missing.tsv"
 
 # --- scope.txt ------------------------------------------------------------------
 langs=$(awk -F '\t' '$5 != "generated" && $5 != "vendor" { c[$4]++ } END { for (l in c) printf "%s:%d ", l, c[l] }' "$ctx/files.tsv")
@@ -450,6 +517,7 @@ langs=$(awk -F '\t' '$5 != "generated" && $5 != "vendor" { c[$4]++ } END { for (
   echo "root=$top"
   echo "scope=$desc"
   echo "head=$head"
+  echo "base=$basesha"
   echo "branch=$(git symbolic-ref --short -q HEAD || echo detached)"
   echo "files=$total"
   echo "reviewable_files=$reviewable"
@@ -466,6 +534,7 @@ langs=$(awk -F '\t' '$5 != "generated" && $5 != "vendor" { c[$4]++ } END { for (
   echo "diff_tokens_est=$tok_review"
   echo "noise_tokens_est=$tok_noise"
   echo "size_warnings=$(wc -l <"$ctx/size.tsv" | tr -d ' ')"
+  echo "missing_tools=$(wc -l <"$ctx/missing.tsv" | tr -d ' ')"
   cat "$ctx/signals.txt"
 } >"$ctx/scope.txt"
 
@@ -473,6 +542,7 @@ if [ "$dry" = 1 ]; then
   echo "# dry run: nothing written"
   cat "$ctx/scope.txt"
   [ -s "$ctx/size.tsv" ] && { echo "# size warnings: flag path metric est_tokens suggestion"; cat "$ctx/size.tsv"; }
+[ -s "$ctx/missing.tsv" ] && { echo "# missing tools: tool needed_for install"; cat "$ctx/missing.tsv"; }
   exit 0
 fi
 
@@ -482,4 +552,5 @@ mkdir -p "$run/lenses" "$run/security-issues/poc" || die 1 "cannot populate $run
 cp -R "$ctx" "$run/context" || die 1 "cannot write $run/context"
 cat "$run/context/scope.txt"
 [ -s "$ctx/size.tsv" ] && { echo "# size warnings: flag path metric est_tokens suggestion"; cat "$ctx/size.tsv"; }
+[ -s "$ctx/missing.tsv" ] && { echo "# missing tools: tool needed_for install"; cat "$ctx/missing.tsv"; }
 exit 0

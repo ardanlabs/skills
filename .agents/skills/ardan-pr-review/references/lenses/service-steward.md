@@ -6,6 +6,15 @@ Priority: correctness, explicit repo rules, Go idioms, App ↔ Business ↔ Stor
 
 A failing `go-build`, `go-vet`, or linter row in `checks/` on changed code is a finding — cite the log line. For `.go` files apply `use-modern-go` and `ardan-service-architecture`.
 
+Go analyzer rows in `checks/` (changed code only):
+
+- `staticcheck`, `golangci-lint` — each hit is a finding at the Gate its effect warrants.
+- `checklocks` — a violation of an existing `+checklocks`/`+checkatomic` annotation is a data race (G4). "may require checklocks annotation for X" is not a finding by itself: it names the lock that guards those fields, so verify the changed code holds it on every access.
+- `nilaway` — candidate nil dereferences. Confirm the nil flow can happen before reporting; unconfirmed ones go to Open checks.
+- `go-fix` — a modernizer diff on changed lines: G1 (G2 where `use-modern-go` makes it a rule).
+- `gofmt` (file not formatted) and `go-mod-tidy` (`go.mod`/`go.sum` not tidy) — G2.
+- `apidiff` — incompatible exported-API changes: confirm every caller in the repo was updated (step 1); an unannounced break of a library package is G3.
+
 ## Patrol route
 
 1. **Surface and contract.** Broken signatures, changed exported APIs not updated at call sites (callers are in `brief.md`), surprising zero values, `context` misuse (stored, not propagated, cancellation ignored).

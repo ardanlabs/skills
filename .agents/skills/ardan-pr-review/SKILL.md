@@ -27,6 +27,8 @@ Note what was given: scope (default: unstaged + untracked; or `--staged`, `--bas
 
 `intake.sh --dry-run <scope> [--id <ticket id>]` writes nothing. On exit `3` the reviewed code isn't checked out: relay the printed command and stop. On `4` there is nothing to review: say so and stop. On `2` fix the arguments.
 
+**Missing tools come first.** If `missing_tools > 0`, before any question show the `# missing tools` rows as a table (tool, what it checks, install command) and say: install them now and they are used by this run; the review goes ahead either way, and a missing tool's checks show as `skipped`. Rows marked `rebuild` are installed but built with an older Go than the active toolchain, so they fail on its standard library — the same install command rebuilds them. A `cgo` row means `go test -race` will fail until a C compiler is available.
+
 ## 3. Ask
 
 One round (native question UI if available, ≤2 batches). Skip what the request already answered.
@@ -112,7 +114,7 @@ From its reply and `rg '^#### F' <run>/findings.md`: overall Gate, counts per Ga
   security-issues/poc/<name>/    optional PoCs
   lenses/<agent>[-<k>].md        raw agent reports
   context/                       scope.txt files.tsv skipped.tsv symbols.tsv refs.tsv signals.txt shards.tsv
-                                 size.tsv packages.tsv rules.txt tools.tsv diff.patch generated.patch
+                                 size.tsv packages.tsv rules.txt tools.tsv missing.tsv diff.patch generated.patch
                                  ticket.md pr.md commits.txt brief.md ac-review.md checks/
 ```
 

@@ -78,15 +78,22 @@ try {
     }
     function SaveLog([string]$rng) { Out-Lines (Join-Path $ctx 'commits.txt') (GitOut log --no-color '--format=%h %s%n%b' $rng) }
     $part = Join-Path $tmp 'part.patch'
+    # baseSha: the commit the diff is taken against (apidiff, buf breaking); empty when the PR
+    # base is not available locally.
+    $baseSha = $head
 
     if ($Base) {
         if (-not (GitOut rev-parse --verify -q "$Base^{commit}")) { Die 2 "unknown base ref: $Base" }
+        $baseSha = GitOut merge-base $Base HEAD
+        if (-not $baseSha) { Die 2 "no merge base between $Base and HEAD" }
         GitDiffTo $patch @("$Base...HEAD"); SaveLog "$Base..HEAD"; $desc = "$Base...HEAD"
     } elseif ($Range) {
         if ($Range -cnotmatch '^(.+?)\.\.(.+)$') { Die 2 '-Range must be A..B' }
         $bsha = GitOut rev-parse --verify -q "$($Matches[2])^{commit}"
         if (-not $bsha) { Die 2 "unknown ref: $($Matches[2])" }
         if ($bsha -ne $head) { Die 3 "range end $($Matches[2]) is not HEAD; check out $($Matches[2]) so checks run on the reviewed code" }
+        $baseSha = GitOut rev-parse --verify -q "$($Matches[1])^{commit}"
+        if (-not $baseSha) { Die 2 "unknown ref: $($Matches[1])" }
         GitDiffTo $patch @($Range); SaveLog $Range; $desc = $Range
     } elseif ($Pr) {
         if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { Die 2 '-Pr needs the gh CLI' }
@@ -97,8 +104,10 @@ try {
         if ($LASTEXITCODE -eq 0) {
             $mb = GitOut merge-base $meta.baseRefOid HEAD
             GitDiffTo $patch @("$mb...HEAD"); SaveLog "$mb..HEAD"
+            $baseSha = "$mb"
         } else {
             if ($Exclude.Count) { Die 2 '-Exclude needs the PR base commit locally (git fetch it first)' }
+            $baseSha = ''
             [IO.File]::WriteAllText($patch, ((& gh pr diff $Pr --color=never) -join "`n") + "`n", $utf8)
         }
         $pv = & gh pr view $Pr --json title,body,url 2>$null | ConvertFrom-Json
@@ -463,26 +472,75 @@ try {
     Out-Lines (Join-Path $ctx 'rules.txt') @($rules)
 
     # --- tools --------------------------------------------------------------------------
-    $tools = foreach ($t in 'git', 'gh', 'go', 'gopls', 'staticcheck', 'golangci-lint', 'gosec', 'govulncheck', 'dupl', 'gitleaks',
-        'trufflehog', 'detect-secrets', 'semgrep', 'osv-scanner', 'trivy', 'grype', 'jscpd', 'pmd', 'ast-grep', 'rg', 'shellcheck',
+    $tools = foreach ($t in 'git', 'gh', 'go', 'gopls', 'staticcheck', 'golangci-lint', 'gosec', 'govulncheck', 'dupl',
+        'checklocks', 'errcheck', 'nilaway', 'deadcode', 'apidiff', 'gitleaks', 'trufflehog', 'detect-secrets', 'semgrep', 'osv-scanner', 'trivy', 'grype', 'jscpd', 'pmd', 'ast-grep', 'rg', 'shellcheck',
         'node', 'npm', 'pnpm', 'yarn', 'opa', 'conftest', 'buf', 'sqlfluff', 'helm', 'kubectl', 'terraform', 'tflint', 'hadolint') {
         $c = Get-Command $t -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($c) { "$t`t$($c.Source)" }
     }
     Out-Lines (Join-Path $ctx 'tools.tsv') @($tools)
 
+    # --- missing.tsv: tool needed_for fix -------------------------------------------------
+    # Tools this change needs but that are absent, or Go tools built with an older Go release
+    # than the active toolchain (analyzers built that way fail on the newer standard library).
+    # Checks skip what is missing; the user is told how to install it.
+    $toolPaths = @{}; foreach ($r in @($tools)) { $f = $r -split "`t"; $toolPaths[$f[0]] = $f[1] }
+    function GoMinor([string]$s) { if ($s -cmatch 'go(\d+)\.(\d+)') { [version]"$($Matches[1]).$($Matches[2])" } else { $null } }
+    $goCur = if ($toolPaths.ContainsKey('go')) { GoMinor ((& go env GOVERSION 2>$null) -join '') } else { $null }
+    function Need([string]$t, [string]$for, [string]$fix, [switch]$Go) {
+        if (-not $toolPaths.ContainsKey($t)) { return "$t`t$for`t$fix" }
+        if (-not $Go -or -not $goCur) { return }
+        $built = GoMinor ((& go version $toolPaths[$t] 2>$null) -join '')
+        if ($built -and $built -lt $goCur) { "$t`t$for (built with go$built, toolchain is go${goCur}: rebuild)`t$fix" }
+    }
+    $liveLangs = @{}; foreach ($r in $rev) { if ($r.St -ne 'D') { $liveLangs[$r.Lang] = $true } }
+    $missing = @(
+        if ($pk.Count) {
+            Need 'go' 'build, vet, tests' 'https://go.dev/dl/'
+            if ($toolPaths.ContainsKey('go') -and ((& go env CGO_ENABLED 2>$null) -join '') -ne '1') {
+                "cgo`tgo test -race (CGO_ENABLED=0)`tinstall a C compiler (clang/gcc) and set CGO_ENABLED=1"
+            }
+            Need 'gopls' 'symbol lookups by reviewers' 'go install golang.org/x/tools/gopls@latest' -Go
+            Need 'staticcheck' 'staticcheck' 'go install honnef.co/go/tools/cmd/staticcheck@latest' -Go
+            $mods = @($pk | ForEach-Object { ($_ -split "`t")[0] } | Select-Object -Unique)
+            if ($mods | Where-Object { Get-ChildItem -LiteralPath $_ -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -cmatch '^\.golangci\.(ya?ml|toml|json)$' } }) {
+                Need 'golangci-lint' 'repo golangci-lint config' 'go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest' -Go
+            }
+            Need 'gosec' 'Go security scan' 'go install github.com/securego/gosec/v2/cmd/gosec@latest' -Go
+            Need 'govulncheck' 'Go vulnerability scan' 'go install golang.org/x/vuln/cmd/govulncheck@latest' -Go
+            Need 'dupl' 'Go clone detection' 'go install github.com/mibk/dupl@latest' -Go
+            Need 'checklocks' 'lock annotations (+checklocks)' 'go install gvisor.dev/gvisor/tools/checklocks/cmd/checklocks@go' -Go
+            Need 'errcheck' 'unchecked errors' 'go install github.com/kisielk/errcheck@latest' -Go
+            Need 'nilaway' 'nil dereferences' 'go install go.uber.org/nilaway/cmd/nilaway@latest' -Go
+            Need 'deadcode' 'unreachable functions' 'go install golang.org/x/tools/cmd/deadcode@latest' -Go
+            Need 'apidiff' 'exported API breaks' 'go install golang.org/x/exp/cmd/apidiff@latest' -Go
+        }
+        if ($liveLangs['proto'] -and ((Test-Path -LiteralPath 'buf.yaml') -or (Test-Path -LiteralPath 'buf.work.yaml'))) {
+            Need 'buf' 'proto lint and breaking changes' 'go install github.com/bufbuild/buf/cmd/buf@latest'
+        }
+        if ($liveLangs['sh']) { Need 'shellcheck' 'shell lint' 'https://github.com/koalaman/shellcheck#installing' }
+        if ($liveLangs['js'] -or $liveLangs['ts'] -or $liveLangs['vue']) { Need 'jscpd' 'JS/TS clone detection' 'npm install -g jscpd' }
+        if (-not $toolPaths.ContainsKey('trufflehog')) { Need 'gitleaks' 'secret scan' 'go install github.com/zricethezav/gitleaks/v8@latest' }
+        if (@('.semgrep.yml', '.semgrep.yaml', '.semgrep') | Where-Object { Test-Path -LiteralPath $_ }) {
+            Need 'semgrep' 'repo semgrep rules' 'python3 -m pip install semgrep'
+        }
+    ) | Where-Object { $_ }
+    $missing = @($missing)
+    Out-Lines (Join-Path $ctx 'missing.tsv') $missing
+
     # --- scope.txt ----------------------------------------------------------------------
     $langs = ($rev | Group-Object Lang | ForEach-Object { "$($_.Name):$($_.Count)" }) -join ' '
     $branch = GitOut symbolic-ref --short -q HEAD; if (-not $branch) { $branch = 'detached' }
-    $scope = @("id=$slug", "nn=$nn", "run=$run", "root=$top", "scope=$desc", "head=$head", "branch=$branch",
+    $scope = @("id=$slug", "nn=$nn", "run=$run", "root=$top", "scope=$desc", "head=$head", "base=$baseSha", "branch=$branch",
         "files=$($allRecs.Count)", "reviewable_files=$($rev.Count)", "skipped_files=$($skippedRecs.Count)", "lines_added=$added", "lines_deleted=$deleted",
         "code_files=$($code.Count)", "code_lines_changed=$codeLines", "languages=$langs", "go_packages=$($pk.Count)",
         "symbols=$($syms.Count)", "refs=$($refs.Count)", "shards=$shards",
-        "diff_tokens_est=$tokReview", "noise_tokens_est=$tokNoise", "size_warnings=$($sizeLines.Count)") + $signals
+        "diff_tokens_est=$tokReview", "noise_tokens_est=$tokNoise", "size_warnings=$($sizeLines.Count)", "missing_tools=$($missing.Count)") + $signals
     Out-Lines (Join-Path $ctx 'scope.txt') $scope
 
     $sizeOut = @(); if ($sizeLines.Count) { $sizeOut = @('# size warnings: flag path metric est_tokens suggestion') + $sizeLines }
-    if ($DryRun) { '# dry run: nothing written'; $scope; $sizeOut; exit 0 }
+    $missOut = @(); if ($missing.Count) { $missOut = @('# missing tools: tool needed_for install') + $missing }
+    if ($DryRun) { '# dry run: nothing written'; $scope; $sizeOut; $missOut; exit 0 }
 
     New-Item -ItemType Directory -Path $idDir -Force | Out-Null
     if (Test-Path -LiteralPath $run) { Die 1 "run directory $run already exists" }
@@ -491,6 +549,7 @@ try {
     Copy-Item -LiteralPath $ctx -Destination "$run/context" -Recurse
     $scope
     $sizeOut
+    $missOut
 } finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }

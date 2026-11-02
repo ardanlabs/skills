@@ -31,6 +31,32 @@ Available plugins: `use-modern-go`, `ardan-service-architecture`, `ardan-pr-revi
 
 Plugin skills are namespaced, so `ardan-pr-review` is invoked as `/ardan-pr-review:ardan-pr-review`. Pull newer versions with `/plugin marketplace update ardanlabs` — plugins are unpinned, so every commit to `main` is a new version.
 
+## PR review tools
+
+`ardan-pr-review` runs the tools below when the change needs them. A missing tool is listed with its install command at the start of a review, and its check is skipped. Go tools built with an older Go than the active toolchain are flagged for a rebuild: analyzers fail on a newer standard library.
+
+| Tool                                 | Checks                                          | Install                                                                      |
+|--------------------------------------|-------------------------------------------------|------------------------------------------------------------------------------|
+| `go` (`build`, `vet`, `test -race`, `fix -diff`, `mod tidy -diff`, `gofmt`) | build, vet, tests and data races, modernizers, module and format hygiene | [go.dev/dl](https://go.dev/dl/); `-race` needs cgo and a C compiler |
+| `staticcheck`                        | Go correctness and simplifications              | `go install honnef.co/go/tools/cmd/staticcheck@latest`                       |
+| `golangci-lint`                      | the repo's own lint config, when it has one     | `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`   |
+| `checklocks`                         | `+checklocks` lock and atomic annotations       | `go install gvisor.dev/gvisor/tools/checklocks/cmd/checklocks@go`            |
+| `errcheck`                           | unchecked errors                                | `go install github.com/kisielk/errcheck@latest`                              |
+| `nilaway`                            | nil dereferences                                | `go install go.uber.org/nilaway/cmd/nilaway@latest`                          |
+| `deadcode`                           | unreachable functions                           | `go install golang.org/x/tools/cmd/deadcode@latest`                          |
+| `apidiff`                            | exported Go API breaks against the base commit  | `go install golang.org/x/exp/cmd/apidiff@latest`                             |
+| `gosec`                              | Go security                                     | `go install github.com/securego/gosec/v2/cmd/gosec@latest`                   |
+| `govulncheck`                        | known vulnerabilities                           | `go install golang.org/x/vuln/cmd/govulncheck@latest`                        |
+| `dupl`                               | Go clones                                       | `go install github.com/mibk/dupl@latest`                                     |
+| `gopls`                              | symbol lookups by reviewers                     | `go install golang.org/x/tools/gopls@latest`                                 |
+| `buf`                                | proto lint and breaking changes (`buf.yaml`)    | `go install github.com/bufbuild/buf/cmd/buf@latest`                          |
+| `gitleaks`                           | secrets in the diff                             | `go install github.com/zricethezav/gitleaks/v8@latest`                       |
+| `shellcheck`                         | shell scripts                                   | [shellcheck#installing](https://github.com/koalaman/shellcheck#installing)   |
+| `jscpd`                              | JS/TS clones                                    | `npm install -g jscpd`                                                       |
+| `semgrep`                            | the repo's own semgrep rules, when it has them  | `python3 -m pip install semgrep`                                             |
+
+`checklocks` is installed from gVisor's `go` branch, the only one that builds with plain `go install`.
+
 ## Claude Code settings
 
 Example Claude Code configuration, split into global (user-level) and project-level.

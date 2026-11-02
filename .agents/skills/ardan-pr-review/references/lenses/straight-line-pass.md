@@ -12,7 +12,8 @@ Don't propose behavior or public-contract changes, merging unrelated concerns, d
 
 1. **Control flow.** Nested conditionals → guard clauses; branch chains → default-first assignment or a naked switch (`ardan-service-architecture` `references/branching.md`); tangled success/error paths.
 2. **Noise.** Temp variables that hide intent, wrappers with no domain value, comments narrating the code, names that force reading the implementation. (Duplication belongs to Clone Hunter.)
-3. **Preservation.** For each suggestion, say why observable behavior is unchanged.
+3. **Dead code.** `deadcode` in `checks/` lists functions in changed files that neither a `main` nor a test reaches. Report ones the diff added or left unreachable (G2); an exported function of a library package may be public API — say so instead of calling it dead.
+4. **Preservation.** For each suggestion, say why observable behavior is unchanged.
 
 ## Gates
 

@@ -8,9 +8,9 @@ Turn the agents' reports into the one report the user reads, and act as the seco
 
 1. **Merge.** Deduplicate findings by failure mode and location; keep the higher Gate and list every lens that raised it.
 2. **Verify.** For each G2+ finding, re-open the cited line and try to refute it: stale line, untouched code, handled elsewhere (find where), intended per ticket or contract, false pattern match. Spot-check G1. Drop, downgrade, or move to Open checks what doesn't hold. Upgrade only on evidence.
-3. **Failed checks.** A `fail` row in `checks/summary.tsv` on changed code that no agent reported becomes a finding (build/vet/lint → Service Steward, tests → Harness Map).
+3. **Failed checks.** A `fail` or `findings` row in `checks/summary.tsv` on changed code that no agent reported becomes a finding: build, vet, staticcheck/golangci-lint, checklocks, nilaway, go-fix, gofmt, go-mod-tidy → Service Steward; errcheck → Error Tripwire; tests (including data races) → Harness Map; apidiff, buf-lint, buf-breaking → Boundary Keeper; deadcode → Straight-Line Pass.
 4. **Reopened risk.** A polish G3/G4 that contradicts a risk agent's conclusion goes first in the Fix queue, naming the agent to re-run.
-5. **Security issues** are the surviving Security Sentinel and generated-code findings. Your prompt gives the mode: *off* (none exist; Run matrix says `not run`), *redacted*, or *named*.
+5. **Security issues** are the surviving Security Sentinel and generated-code findings. Your prompt gives the mode: *off* (none exist), *redacted*, or *named*.
 6. **Number** findings `F1…Fn`, G4 → G1, then by path — in *redacted* mode, without the security issues.
 7. **Security files.** Write each security issue to `security-issues/issue-NNN.md` (`001`, `002`, … G4 → G1, then by path): title, Gate, Where, Exploit, Impact, Proof, Assumption, Patch direction (rotate first for a real secret), Verify, and the PoC path under `security-issues/poc/` if any (in *named* mode also `F<n>`, and that finding in `findings.md` ends with `- Details: security-issues/issue-NNN.md`). In *redacted* mode, security open checks go to `security-issues/open-checks.md`.
 8. **Diagrams.** Follow `<skill>/references/roles/diagrams.md` to write `diagrams.md`, using the ids from step 6.
@@ -25,8 +25,9 @@ Turn the agents' reports into the one report the user reads, and act as the seco
 - AC table: Criterion ≤ 20 words; Sites = `path:line` only; Proof / gap ≤ 15 words plus citations.
 - Spec/AC weakness: one line on the problem, one Given/When/Then line.
 - Failed checks, Open checks, Suggested verification: one line each; at most 2 quoted log lines per failed check.
+- Run matrix: one row per lens with at least one finding. Omit lenses with zero findings and lenses that did not run; with no rows left, the section says only `No findings.`.
 
-**Redacted mode.** `findings.md` names no security issue: no title, location, file, symbol, or detail, in any section (Fix queue, Failed checks, Open checks, Suggested verification). When there are any, the Security section says only `Security issues detected.`. The Run matrix keeps the security counts, and the Overall Gate still counts their Gates.
+**Redacted mode.** `findings.md` names no security issue: no title, location, file, symbol, or detail, in any section (Fix queue, Failed checks, Open checks, Suggested verification). When there are any, the Security section says only `Security issues detected.`. The Run matrix keeps the security count (when non-zero), and the Overall Gate still counts their Gates.
 
 ## Template
 
@@ -41,18 +42,18 @@ Overall Gate: G<n> — <Clear|Polish|Tighten|Repair|Stop>
 Security issues detected.
 
 ## Run matrix
-| Lens                   | Gate          | Findings |
-|------------------------|---------------|----------|
-| Security Sentinel      | Gx            | n        |
-| Generated-code secrets | Gx / not run  | n        |
-| Spec Cartographer      | Gx / not run  | n        |
-| Service Steward        | Gx / not run  | n        |
-| Error Tripwire         | Gx / not run  | n        |
-| Boundary Keeper        | Gx / not run  | n        |
-| Harness Map            | Gx / not run  | n        |
-| Clone Hunter           | Gx / not run  | n        |
-| Straight-Line Pass     | Gx / not run  | n        |
-| Doc Drift Check        | Gx / not run  | n        |
+| Lens                   | Gate | Findings |
+|------------------------|------|----------|
+| Security Sentinel      | Gx   | n        |
+| Generated-code secrets | Gx   | n        |
+| Spec Cartographer      | Gx   | n        |
+| Service Steward        | Gx   | n        |
+| Error Tripwire         | Gx   | n        |
+| Boundary Keeper        | Gx   | n        |
+| Harness Map            | Gx   | n        |
+| Clone Hunter           | Gx   | n        |
+| Straight-Line Pass     | Gx   | n        |
+| Doc Drift Check        | Gx   | n        |
 
 ## Acceptance-criteria coverage
 Criteria source: <from your prompt: ticket | suggested BDD | best-effort from PR/commits>
