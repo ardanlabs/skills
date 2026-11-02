@@ -34,7 +34,7 @@ Always apply these skills when doing feature work; do not rely on memory:
 
 ## Reviewing a PR
 
-- `pr-review` — for any PR / diff / pre-commit review. It runs a guided review: asks for missing inputs (diff scope, issue-tracker URL, issue id), reviews the diff against the ticket's acceptance criteria, and writes auto-numbered findings and Mermaid diagrams under `.reviews/<issue-id>/`.
+- `ardan-pr-review` — for any PR / diff / pre-commit review. It runs a guided review: asks for missing inputs (diff scope, issue-tracker link, issue id), checks the ticket's acceptance criteria (suggesting BDD criteria when they are missing or weak), reviews the diff against them, and writes auto-numbered findings, security issues, and Mermaid diagrams under `.reviews/<ticket-id>/<NNN>/`.
 
 ## Verifying code
 

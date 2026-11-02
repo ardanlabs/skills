@@ -41,17 +41,18 @@
       "repository": "https://github.com/ardanlabs/skills"
     },
     {
-      "name": "pr-review",
+      "name": "ardan-pr-review",
       "source": "./",
       "skills": [
-        "./.agents/skills/pr-review"
+        "./.agents/skills/ardan-pr-review"
       ],
-      "description": "Read-only PR review lenses for security, feature completeness, correctness, error visibility, comments, tests, contracts, duplication, and simplification.",
+      "description": "Guided, read-only PR review: scripted preprocessing and checks run once, parallel lens agents (security, acceptance criteria, correctness, tests, polish) read a shared brief, and an issues-only report plus color-coded Mermaid diagrams are written per run.",
       "category": "code-review",
       "keywords": [
         "review",
         "pull-request",
         "security",
+        "acceptance-criteria",
         "go"
       ],
       "license": "Apache-2.0",

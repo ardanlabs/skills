@@ -15,7 +15,7 @@ A collection of AI skills for development work, primarily Go. Compatible with Cl
 |----------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [use-modern-go](.agents/skills/use-modern-go/SKILL.md)                           | Apply modern Go syntax based on the project's Go version.                                                                                                      |
 | [ardan-service-architecture](.agents/skills/ardan-service-architecture/SKILL.md) | Service layering (primitives at edges, strong types in Business, named converters), the `ExtBusiness`/`Extension` decorator seam, and default-first branching. |
-| [pr-review](.agents/skills/pr-review/SKILL.md)                                   | Read-only PR review lenses for correctness, error visibility, comments, tests, contracts, and simplification across all repo languages.                        |
+| [ardan-pr-review](.agents/skills/ardan-pr-review/SKILL.md)                       | Guided read-only PR review: scripted intake/checks, parallel lens agents, issues-only findings and color-coded Mermaid diagrams.                                 |
 
 ## Install as a Claude Code plugin
 
@@ -23,13 +23,13 @@ This repo is a [Claude Code plugin marketplace](https://code.claude.com/docs/en/
 
 ```
 /plugin marketplace add ardanlabs/skills
-/plugin install pr-review@ardanlabs
+/plugin install ardan-pr-review@ardanlabs
 /reload-plugins
 ```
 
-Available plugins: `use-modern-go`, `ardan-service-architecture`, `pr-review`.
+Available plugins: `use-modern-go`, `ardan-service-architecture`, `ardan-pr-review`.
 
-Plugin skills are namespaced, so `pr-review` is invoked as `/pr-review:pr-review`. Pull newer versions with `/plugin marketplace update ardanlabs` — plugins are unpinned, so every commit to `main` is a new version.
+Plugin skills are namespaced, so `ardan-pr-review` is invoked as `/ardan-pr-review:ardan-pr-review`. Pull newer versions with `/plugin marketplace update ardanlabs` — plugins are unpinned, so every commit to `main` is a new version.
 
 ## Claude Code settings
 
