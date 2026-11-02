@@ -4,7 +4,8 @@
 # PowerShell port of intake.sh (same outputs). Resolves the review scope in the current git
 # repo and writes <ReviewsDir>/<id>/<NNN>/context/ (default .reviews at the repo root). Default scope: unstaged changes + untracked
 # files. -Exclude drops paths from the scope. -Depth: see intake.sh (review-set.tsv).
-# Size guard: see intake.sh. -DryRun prints the summary without writing anything.
+# Size guard: see intake.sh. Symlinks are never reviewed. -DryRun prints the summary without
+# writing anything.
 # Exit: 0 ok | 2 usage | 3 code on disk is not the code under review | 4 empty diff | 5 not a git repo.
 param(
     [string]$Id = '',
@@ -205,12 +206,14 @@ try {
             # fallback for header-only sections (mode change): "diff --git a/P b/P"
             $g = $ln.Substring(13); $gp = ''
             if (($g.Length - 3) % 2 -eq 0) { $n = ($g.Length - 3) / 2; if ($g.Substring(0, $n) -ceq $g.Substring($n + 3)) { $gp = FixPath $g.Substring(0, $n) } }
-            $cur = [pscustomobject]@{ St = 'M'; Add = 0; Del = 0; Path = ''; GitPath = $gp; Bytes = 0; Start = $i; End = 0 }; $inh = $true
+            $cur = [pscustomobject]@{ St = 'M'; Add = 0; Del = 0; Path = ''; GitPath = $gp; Bytes = 0; Start = $i; End = 0; Link = $false }; $inh = $true
             $cur.Bytes += $ln.Length + 1; continue
         }
         if (-not $cur) { continue }
         $cur.Bytes += $ln.Length + 1
         if ($inh) {
+            # mode 120000 = symlink (new, deleted, mode change, or "index a..b 120000")
+            if ($ln -cmatch '^(new file mode|deleted file mode|new mode|old mode|index [0-9a-f]+\.\.[0-9a-f]+) 120000$') { $cur.Link = $true }
             if ($ln.StartsWith('new file mode')) { $cur.St = 'A' }
             elseif ($ln.StartsWith('deleted file mode')) { $cur.St = 'D' }
             elseif ($ln.StartsWith('rename to ')) { $cur.St = 'R'; $cur.Path = FixPath $ln.Substring(10) }
@@ -230,8 +233,11 @@ try {
 
     $langOf = New-Object hashtable ([StringComparer]::Ordinal); $kindOf = New-Object hashtable ([StringComparer]::Ordinal)
     $recs2 = foreach ($r in $recs) {
-        $l = LangOf $r.Path; $k = KindOf $r.Path $l
-        if ($k -ne 'generated' -and $k -ne 'vendor' -and $r.St -ne 'D' -and (Test-Path -LiteralPath $r.Path -PathType Leaf)) {
+        # Symlinks are never reviewed: the target can be outside the repo (~/.aws/credentials).
+        $l = LangOf $r.Path; $k = if ($r.Link) { 'symlink' } else { KindOf $r.Path $l }
+        $item = Get-Item -LiteralPath $r.Path -Force -ErrorAction SilentlyContinue
+        if ($item -and ($item.LinkType -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint))) { $k = 'symlink' }
+        if ($k -ne 'generated' -and $k -ne 'vendor' -and $k -ne 'symlink' -and $r.St -ne 'D' -and (Test-Path -LiteralPath $r.Path -PathType Leaf)) {
             if ((GitOut check-attr linguist-generated -- $r.Path) -cmatch ': (set|true)$') { $k = 'generated' }
             if ($k -ne 'generated' -and 'go', 'proto', 'ts', 'js', 'py' -contains $l) {
                 if ((Get-Content -LiteralPath $r.Path -TotalCount 5 -ErrorAction SilentlyContinue) -cmatch 'Code generated .*DO NOT EDIT') { $k = 'generated' }
@@ -245,7 +251,7 @@ try {
     }
     $allRecs = @($recs2)
     function RowOf($f) { "$($f.St)`t$($f.Add)`t$($f.Del)`t$($f.Lang)`t$($f.Kind)`t$($f.Layer)`t$($f.Path)" }
-    function IsSkipped($f) { $f.Kind -eq 'generated' -or $f.Kind -eq 'vendor' }
+    function IsSkipped($f) { $f.Kind -eq 'generated' -or $f.Kind -eq 'vendor' -or $f.Kind -eq 'symlink' }
     $fileRecs = @($allRecs | Where-Object { -not (IsSkipped $_) })
     $skippedRecs = @($allRecs | Where-Object { IsSkipped $_ })
     Out-Lines (Join-Path $ctx 'files.tsv') ($fileRecs | ForEach-Object { RowOf $_ })
@@ -262,7 +268,7 @@ try {
         Out-Lines $patch $kept $latin1
         $lines = $kept.ToArray()
     }
-    if (-not $fileRecs.Count) { Die 4 "only generated/vendored files changed in scope ($desc); nothing to review" }
+    if (-not $fileRecs.Count) { Die 4 "only generated/vendored files or symlinks changed in scope ($desc); nothing to review" }
 
     # --- routing signals + changed symbols ------------------------------------------
     function GoSym([string]$s) {
@@ -488,7 +494,8 @@ try {
         if (IsSkipped $f) {
             $tokNoise += $t
             $lbl = $f.Kind + $(if ($lock) { '/lockfile' } else { '' })
-            $size.Add([pscustomobject]@{ F = 'noise'; P = $f.Path; M = "$lbl $($f.Add + $f.Del) lines"; T = $t; S = 'skipped: generated/vendored files are never reviewed; keep them out of the PR' })
+            $sug = if ($f.Kind -eq 'symlink') { 'skipped: symlinks are never reviewed (the target can be outside the repo)' } else { 'skipped: generated/vendored files are never reviewed; keep them out of the PR' }
+            $size.Add([pscustomobject]@{ F = 'noise'; P = $f.Path; M = "$lbl $($f.Add + $f.Del) lines"; T = $t; S = $sug })
             continue
         }
         $tokReview += $t

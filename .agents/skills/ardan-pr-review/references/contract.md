@@ -28,7 +28,7 @@ The depth (`Review depth:` in your prompt, `depth=` in `scope.txt`) sets what yo
 | `checks/summary.tsv`              | Build, vet, tests (`-race`), linters, analyzers, scanners, clone detectors — already run. Status `pass`, `fail`, `findings` (hits reported on output), or `skipped`. Open a log only when its row matters. Package-wide tools (staticcheck, errcheck, nilaway, checklocks, gosec) report on whole packages: only hits in scope (see Review scope) are findings. |
 | `ticket.md`, `pr.md`, `commits.txt` | Ticket, PR description, commit messages (whichever exist).                                          |
 | `rules.txt`                       | `AGENTS.md`/`CLAUDE.md` files governing the changed paths; the brief digests them.                     |
-| `skipped.tsv`                     | Generated and vendored files. Never reviewed; never read `generated.patch`.                            |
+| `skipped.tsv`                     | Generated and vendored files and symlinks. Never reviewed; never read `generated.patch`. Never open a symlink (`kind=symlink`): its target can be outside the repo. |
 
 ## Rules
 

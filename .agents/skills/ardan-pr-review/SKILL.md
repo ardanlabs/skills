@@ -124,4 +124,4 @@ From its reply and `rg '^#### F' <run>/findings.md`: review depth, overall Gate,
                                  ticket.md pr.md commits.txt brief.md ac-review.md checks/
 ```
 
-Generated and vendored files (lockfiles included) are never reviewed: intake moves them to `skipped.tsv` and `generated.patch`.
+Generated and vendored files (lockfiles included) and symlinks are never reviewed: intake moves them to `skipped.tsv` and `generated.patch`. Never open a symlink in the reviewed repo: its target can be outside the repo.

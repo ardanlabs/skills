@@ -11,7 +11,8 @@
 # repo, listed in review-set.tsv (generated, vendored, binary, and excluded files left out).
 # Size guard: flags files with > --max-file-diff changed lines (800), files agents must
 # read with > --max-file-lines lines (2000), noise (generated/vendor/lockfiles) and PRs
-# over the shard threshold. --dry-run prints the summary without writing anything.
+# over the shard threshold. Symlinks are never reviewed. --dry-run prints the summary without
+# writing anything.
 # Exit: 0 ok | 2 usage | 3 code on disk is not the code under review | 4 empty diff | 5 not a git repo.
 
 set -u
@@ -41,7 +42,7 @@ while [ $# -gt 0 ]; do
     --max-file-lines) MAX_FILE_LINES=${2-}; shift 2 ;;
     --reviews-dir) reviews=${2-}; shift 2 ;;
     --dry-run) dry=1; shift ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) die 2 "unknown argument: $1" ;;
   esac
 done
@@ -210,17 +211,19 @@ awk "$classify_awk"'
     if (path == "") path = gitpath
     if (path == "") return
     l = lang(path)
-    printf "%d\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%d\n", sec, st, add, del, l, kind(path, l), layer(path), path, bytes
+    printf "%d\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%d\n", sec, st, add, del, l, lnk ? "symlink" : kind(path, l), layer(path), path, bytes
   }
   { bytes += length($0) + 1 }
   /^diff --git / {
     bytes -= length($0) + 1; flush()
-    sec++; st = "M"; add = del = 0; path = ""; inh = 1; bytes = length($0) + 1
+    sec++; st = "M"; add = del = lnk = 0; path = ""; inh = 1; bytes = length($0) + 1
     # fallback for header-only sections (mode change): "diff --git a/P b/P"
     g = substr($0, 14); n = (length(g) - 3) / 2
     gitpath = (n == int(n) && substr(g, 1, n) == substr(g, n + 4)) ? substr(g, 1, n) : ""
     next
   }
+  # mode 120000 = symlink (new, deleted, mode change, or "index a..b 120000")
+  inh && / 120000$/ && /^(new file mode|deleted file mode|new mode|old mode|index [0-9a-f]+\.\.[0-9a-f]+) / { lnk = 1 }
   inh && /^new file mode/ { st = "A"; next }
   inh && /^deleted file mode/ { st = "D"; next }
   inh && /^rename to / { st = "R"; path = substr($0, 11); next }
@@ -233,11 +236,14 @@ awk "$classify_awk"'
   END { flush() }
 ' "$patch" >"$tmp/all.raw"
 
-# Re-classify generated files the path rules miss: "Code generated ... DO NOT EDIT",
-# linguist-generated in .gitattributes, or minified/bundled output (a line > 1000 chars).
+# Re-classify symlinks on disk (an untracked one has no mode in its diff) and generated
+# files the path rules miss: "Code generated ... DO NOT EDIT", linguist-generated in
+# .gitattributes, or minified/bundled output (a line > 1000 chars). Symlinks are never
+# reviewed: the target can be outside the repo (~/.aws/credentials).
 tab=$(printf '\t')
 while IFS="$tab" read -r sec st a d l k ly p by; do
-  if [ "$k" != generated ] && [ "$k" != vendor ] && [ "$st" != D ] && [ -f "$p" ]; then
+  [ -L "$p" ] && k=symlink
+  if [ "$k" != generated ] && [ "$k" != vendor ] && [ "$k" != symlink ] && [ "$st" != D ] && [ -f "$p" ]; then
     case $(git check-attr linguist-generated -- "$p" 2>/dev/null) in *": set"|*": true") k=generated ;; esac
     if [ "$k" != generated ]; then
       case $l in
@@ -251,21 +257,21 @@ while IFS="$tab" read -r sec st a d l k ly p by; do
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sec" "$st" "$a" "$d" "$l" "$k" "$ly" "$p" "$by"
 done <"$tmp/all.raw" >"$tmp/all.tsv"
 
-# Generated and vendored files are never reviewed: move their diff sections out of
-# diff.patch into generated.patch (secret scanning only) and list them in skipped.tsv.
+# Generated and vendored files and symlinks are never reviewed: move their diff sections out
+# of diff.patch into generated.patch (secret scanning only) and list them in skipped.tsv.
 : >"$ctx/skipped.tsv"
 awk -F '\t' -v OFS='\t' -v SK="$ctx/skipped.tsv" '
   { row = $2 OFS $3 OFS $4 OFS $5 OFS $6 OFS $7 OFS $8 }
-  $6 == "generated" || $6 == "vendor" { print row > SK; next }
+  $6 == "generated" || $6 == "vendor" || $6 == "symlink" { print row > SK; next }
   { print row }' "$tmp/all.tsv" >"$ctx/files.tsv"
 if [ -s "$ctx/skipped.tsv" ]; then
   awk -F '\t' -v GEN="$ctx/generated.patch" '
-    FNR == NR { if ($6 == "generated" || $6 == "vendor") drop[$1] = 1; next }
+    FNR == NR { if ($6 == "generated" || $6 == "vendor" || $6 == "symlink") drop[$1] = 1; next }
     /^diff --git / { sec++ }
     { if (sec in drop) print > GEN; else print }' "$tmp/all.tsv" "$patch" >"$tmp/kept.patch" &&
     mv "$tmp/kept.patch" "$patch"
 fi
-[ -s "$patch" ] || die 4 "only generated/vendored files changed in scope ($desc); nothing to review"
+[ -s "$patch" ] || die 4 "only generated/vendored files or symlinks changed in scope ($desc); nothing to review"
 
 # --- routing signals + changed symbols ------------------------------------------
 # signals.txt: key=value. symbols.tsv: status kind name path line
@@ -481,10 +487,10 @@ awk -F '\t' -v OFS='\t' -v MD="$MAX_FILE_DIFF" -v ML="$MAX_FILE_LINES" -v SF="$S
   FNR == NR { fl[$1] = $2; fb[$1] = $3; next }
   {
     p = $8; n = $3 + $4; t = int(($9 + 3) / 4); b = p; sub(/.*\//, "", b)
-    if ($6 == "generated" || $6 == "vendor") {
+    if ($6 == "generated" || $6 == "vendor" || $6 == "symlink") {
       noise += t
       lock = (b ~ /^(go\.sum|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|composer\.lock|Gemfile\.lock|poetry\.lock|gomod2nix\.toml)$/)
-      print "noise", p, $6 (lock ? "/lockfile" : "") " " n " lines", t, "skipped: generated/vendored files are never reviewed; keep them out of the PR" > OUT
+      print "noise", p, $6 (lock ? "/lockfile" : "") " " n " lines", t, ($6 == "symlink" ? "skipped: symlinks are never reviewed (the target can be outside the repo)" : "skipped: generated/vendored files are never reviewed; keep them out of the PR") > OUT
       next
     }
     review += t

@@ -8,7 +8,7 @@ Intake writes `context/size.tsv` (`flag path metric est_tokens suggestion`; toke
 | `big-review-set` | full depth: > 30 code files or > 6000 lines in `review-set.tsv` | Agents read whole files, not hunks; heavy agents run once per shard.     |
 | `big-diff`       | one file > 800 changed lines (`--max-file-diff`)                | Its hunks dominate every agent's reading.                                |
 | `huge-file`      | a changed file > 2000 lines (`--max-file-lines`)                | Agents open the whole file for context, repeatedly.                      |
-| `noise`          | generated, vendored, or lockfile                                | Costs nothing — already skipped. Shown so build output stays out of PRs. |
+| `noise`          | generated, vendored, lockfile, or symlink                       | Costs nothing — already skipped. Shown so build output stays out of PRs. |
 
 Show a compact table (flag, path, metric, ~tokens) with `diff_tokens_est` (and `review_tokens_est` at full depth) from `scope.txt`, then ask:
 
@@ -18,4 +18,4 @@ Show a compact table (flag, path, metric, ~tokens) with `diff_tokens_est` (and `
 - **Split the PR** — suggest splits from `shards.tsv` (package groups) and stop. At full depth `shards.tsv` splits the review set, so base the split on `files.tsv` areas instead.
 - **Narrow the depth** — only for `big-review-set`: re-run the preview with a smaller `--depth` (project → packages → files) and confirm.
 
-When only `noise` is flagged, don't ask — say "N generated/vendored files skipped" and move on. Secret-scanning them is a separate opt-in (SKILL.md step 3).
+When only `noise` is flagged, don't ask — say "N generated/vendored files and symlinks skipped" and move on. Secret-scanning them is a separate opt-in (SKILL.md step 3).
