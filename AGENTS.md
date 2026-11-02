@@ -30,7 +30,7 @@
 Always apply these skills when doing feature work; do not rely on memory:
 
 - `use-modern-go` — whenever writing or editing any Go code.
-- `ardan-service-architecture` — before writing, editing, or auditing any `app/*`, `business/domain/*` (including `extensions/*`), or `.../stores/*db` Go file; before adding a cross-cutting concern (OTEL, logging, metrics, caching, auth) or the `ExtBusiness`/`Extension` seam to a `*bus` package; and when writing/refactoring conditional or branching logic in Go. Holds the App ↔ Business ↔ Storage type-boundary and converter rules.
+- `ardan-service-architecture` — before writing, editing, or auditing any `app/*`, `business/domain/*` (including `extensions/*`), `business/composite/*`, or `.../stores/*db` Go file; when coordinating work across Business domains; before adding a cross-cutting concern (OTEL, logging, metrics, caching, auth) or the `ExtBusiness`/`Extension` seam to a `*bus` package; and when writing/refactoring conditional or branching logic in Go. Holds the App ↔ Business ↔ Storage type-boundary and converter rules.
 
 ## Reviewing a PR
 
