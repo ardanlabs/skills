@@ -1,11 +1,14 @@
 #!/bin/sh
 # Usage: sh intake.sh [--id ID] [--base REF | --range A..B | --pr N | --staged | --files F...]
-#                     [--exclude PATHSPEC]... [--max-file-diff N] [--max-file-lines N]
-#                     [--reviews-dir DIR] [--dry-run]
+#                     [--exclude PATHSPEC]... [--depth diff|files|packages|project]
+#                     [--max-file-diff N] [--max-file-lines N] [--reviews-dir DIR] [--dry-run]
 # Resolves the review scope in the current git repo and writes the run directory
 # <reviews-dir>/<id>/<NNN>/context/ (default .reviews at the repo root) (diff, file inventory, symbols, routing signals,
 # shards, packages, tools, missing tools, rules, size warnings). Default scope: unstaged changes +
 # untracked files. --exclude drops paths from the scope (git pathspec; repeatable).
+# --depth sets what reviewers may report on: diff (default) = the change only; files / packages /
+# project = a full review of the changed files, every file in their directories, or the whole
+# repo, listed in review-set.tsv (generated, vendored, binary, and excluded files left out).
 # Size guard: flags files with > --max-file-diff changed lines (800), files agents must
 # read with > --max-file-lines lines (2000), noise (generated/vendor/lockfiles) and PRs
 # over the shard threshold. --dry-run prints the summary without writing anything.
@@ -14,8 +17,10 @@
 set -u
 LC_ALL=C; export LC_ALL  # byte-wise sort/awk, identical on every machine
 
-scope=unstaged base='' range='' pr='' id='' reviews=.reviews dry=0 files='' excl=''
+scope=unstaged base='' range='' pr='' id='' reviews=.reviews dry=0 files='' excl='' depth=diff
 SHARD_FILES=30 SHARD_LINES=2500 BIN_FILES=15 BIN_LINES=1200 MAX_FILE_DIFF=800 MAX_FILE_LINES=2000
+# Full-depth shards weigh whole files, not changed lines.
+SET_SHARD_FILES=30 SET_SHARD_LINES=6000 SET_BIN_FILES=20 SET_BIN_LINES=4000
 MAX_REF_SYMBOLS=200 MAX_REFS=25
 
 die() { code=$1; shift; echo "intake: $*" >&2; exit "$code"; }
@@ -31,14 +36,16 @@ while [ $# -gt 0 ]; do
 "; shift; done ;;
     --exclude) excl="$excl${2%/}
 "; shift 2 ;;
+    --depth) depth=${2-}; shift 2 ;;
     --max-file-diff) MAX_FILE_DIFF=${2-}; shift 2 ;;
     --max-file-lines) MAX_FILE_LINES=${2-}; shift 2 ;;
     --reviews-dir) reviews=${2-}; shift 2 ;;
     --dry-run) dry=1; shift ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) die 2 "unknown argument: $1" ;;
   esac
 done
+case $depth in diff|files|packages|project) ;; *) die 2 "--depth must be diff, files, packages, or project" ;; esac
 
 top=$(git rev-parse --show-toplevel 2>/dev/null) || die 5 "not inside a git repository"
 cd "$top" || die 5 "cannot enter $top"
@@ -153,9 +160,8 @@ done
 nn=$(printf '%03d' $((last + 1)))
 run=$reviews/$slug/$nn
 
-# --- per-file inventory: files.tsv ----------------------------------------------
-# status added deleted lang kind layer path
-awk '
+# lang/kind/layer of a repo-relative path; shared by files.tsv and review-set.tsv.
+classify_awk='
   function lang(p,  b) {
     b = p; sub(/.*\//, "", b); b = tolower(b)
     if (b ~ /\.go$/) return "go"
@@ -193,6 +199,11 @@ awk '
     if (p ~ /(^|\/)foundation\//) return "foundation"
     return "-"
   }
+'
+
+# --- per-file inventory: files.tsv ----------------------------------------------
+# status added deleted lang kind layer path
+awk "$classify_awk"'
   # one row per diff section: sec status added deleted lang kind layer path bytes
   function flush() {
     if (sec == 0) return
@@ -366,6 +377,58 @@ if command -v rg >/dev/null 2>&1 && [ -s "$ctx/symbols.tsv" ]; then
   done >"$ctx/refs.tsv"
 fi
 
+# --- review set (full depth): review-set.tsv ----------------------------------------
+# status added deleted lang kind layer path lines — the files.tsv columns plus the file's
+# line count; status is "-" for files the diff doesn't touch. The same content rules as for
+# changed files drop generated files; binary, empty, excluded, and .reviews files are left out.
+review_files=0 review_lines=0 tok_set=0
+: >"$ctx/review-set.tsv"
+if [ "$depth" != diff ]; then
+  printf '%s' "$excl" >"$tmp/excl"
+  # shellcheck disable=SC2016 # awk code
+  dirof='{ d = $0; if (d !~ /\//) d = "."; else sub(/\/[^\/]*$/, "", d) }'
+  awk -F '\t' '$1 != "D" { print $7 }' "$ctx/files.tsv" >"$tmp/set.changed"
+  case $depth in
+    files) cat "$tmp/set.changed" ;;
+    packages)
+      awk "$dirof"'{ print d }' "$tmp/set.changed" | sort -u >"$tmp/set.dirs"
+      git -c core.quotePath=false ls-files --cached --others --exclude-standard |
+        awk "$dirof"'FILENAME != "-" { D[$0] = 1; next } d in D' "$tmp/set.dirs" - ;;
+    project) git -c core.quotePath=false ls-files --cached --others --exclude-standard ;;
+  esac | sort -u | awk -F '\t' -v OFS='\t' -v RD="${reviews%/}/" "$classify_awk"'
+    FILENAME != "-" { if ($0 != "") X[$0] = 1; next }
+    $0 == "" || index($0, RD) == 1 || $0 ~ /(^|\/)\.reviews\// { next }
+    { for (x in X) if ($0 == x || index($0, x "/") == 1) next
+      l = lang($0); k = kind($0, l)
+      if (k != "generated" && k != "vendor") print l, k, layer($0), $0 }' "$tmp/excl" - >"$tmp/set.cls"
+  # Batched over all candidates (xargs): per-file forks are too slow for a whole repo. Paths
+  # get a ./ prefix so awk never reads one as a var=value assignment.
+  # files0 LANG_RE: "./path" of the set.cls rows whose lang matches, NUL-separated
+  files0() { awk -F '\t' -v re="$1" '$1 ~ re { print "./" $4 }' "$tmp/set.cls" | tr '\n' '\0'; }
+  cut -f4 "$tmp/set.cls" | git check-attr --stdin linguist-generated 2>/dev/null |
+    sed -n -e 's/: linguist-generated: set$//p' -e 's/: linguist-generated: true$//p' |
+    sed 's|^|./|' >"$tmp/set.skip"
+  # shellcheck disable=SC2016 # awk programs run through xargs
+  files0 '^(go|proto|ts|js|py)$' |
+    xargs -0 awk 'FNR > 5 { nextfile } /Code generated .*DO NOT EDIT/ { print FILENAME; nextfile }' >>"$tmp/set.skip" 2>/dev/null
+  # shellcheck disable=SC2016
+  files0 '^(js|ts|css)$' |
+    xargs -0 awk 'length($0) > 1000 { print FILENAME; nextfile }' >>"$tmp/set.skip" 2>/dev/null
+  # Text files only: grep -I lists a file when it is non-empty and not binary.
+  # shellcheck disable=SC2016
+  files0 . | xargs -0 grep -Il . -- 2>/dev/null | tr '\n' '\0' |
+    xargs -0 awk '{ l[FILENAME]++; b[FILENAME] += length($0) + 1 }
+      END { for (f in l) print f "\t" l[f] "\t" b[f] }' >"$tmp/set.size" 2>/dev/null
+  awk -F '\t' -v OFS='\t' -v SK="$tmp/set.skip" -v SZ="$tmp/set.size" -v FT="$ctx/files.tsv" -v TOT="$tmp/set.tot" '
+    BEGIN { while ((getline l < SK) > 0) skip[substr(l, 3)] = 1
+            while ((getline l < SZ) > 0) { split(l, f, "\t"); p = substr(f[1], 3); ln[p] = f[2]; by[p] = f[3] }
+            while ((getline l < FT) > 0) { split(l, f, "\t"); ch[f[7]] = f[1] OFS f[2] OFS f[3] } }
+    ($4 in skip) || !($4 in ln) { next }
+    { print (($4 in ch) ? ch[$4] : "-" OFS 0 OFS 0), $1, $2, $3, $4, ln[$4]; n++; nl += ln[$4]; b += by[$4] }
+    END { print n + 0, nl + 0, int((b + 3) / 4) > TOT }' "$tmp/set.cls" >"$ctx/review-set.tsv"
+  read -r review_files review_lines tok_set <"$tmp/set.tot"
+fi
+
 # --- totals + shards ------------------------------------------------------------
 # shellcheck disable=SC2046 # split the five totals
 set -- $(awk -F '\t' '$5 != "generated" && $5 != "vendor" { n++; a += $2; d += $3 }
@@ -374,12 +437,25 @@ set -- $(awk -F '\t' '$5 != "generated" && $5 != "vendor" { n++; a += $2; d += $
 reviewable=$1 added=$2 deleted=$3 codefiles=$4 codelines=$5
 total=$(wc -l <"$tmp/all.tsv" | tr -d ' ')
 skipped=$(wc -l <"$ctx/skipped.tsv" | tr -d ' ')
-shards=0
-if [ "$codefiles" -gt "$SHARD_FILES" ] || [ "$codelines" -gt "$SHARD_LINES" ]; then
-  awk -F '\t' -v BF="$BIN_FILES" -v BL="$BIN_LINES" '
-    $5 == "generated" || $5 == "vendor" || $5 == "doc" { next }
-    { d = $7; if (d !~ /\//) d = "."; else sub(/\/[^\/]*$/, "", d); print d "\t" $2 + $3 "\t" $7 }
-  ' "$ctx/files.tsv" | sort -t "$(printf '\t')" -k1,1 -k3,3 | awk -F '\t' -v BF="$BIN_FILES" -v BL="$BIN_LINES" '
+# Code files only (docs aren't sharded), grouped by directory. Diff depth weighs changed
+# lines; full depth weighs the review set's whole files, plus deleted files' removed lines.
+# shellcheck disable=SC2046 # split the two totals
+set -- $(awk -F '\t' '$5 != "doc" { n++; l += $8 } END { print n + 0, l + 0 }' "$ctx/review-set.tsv")
+setcodefiles=$1 setcodelines=$2
+shards=0 bigset=0
+if [ "$depth" = diff ]; then
+  bf=$BIN_FILES bl=$BIN_LINES
+  { [ "$codefiles" -gt "$SHARD_FILES" ] || [ "$codelines" -gt "$SHARD_LINES" ]; } && shards=1
+  awk -F '\t' '$5 != "doc" { print $7 "\t" $2 + $3 }' "$ctx/files.tsv" >"$tmp/shard.in"
+else
+  bf=$SET_BIN_FILES bl=$SET_BIN_LINES
+  { [ "$setcodefiles" -gt "$SET_SHARD_FILES" ] || [ "$setcodelines" -gt "$SET_SHARD_LINES" ]; } && shards=1 bigset=1
+  { awk -F '\t' '$5 != "doc" { print $7 "\t" $8 }' "$ctx/review-set.tsv"
+    awk -F '\t' '$1 == "D" && $5 != "doc" { print $7 "\t" $3 }' "$ctx/files.tsv"; } >"$tmp/shard.in"
+fi
+if [ "$shards" = 1 ]; then
+  awk -F '\t' '{ d = $1; if (d !~ /\//) d = "."; else sub(/\/[^\/]*$/, "", d); print d "\t" $2 "\t" $1 }' "$tmp/shard.in" |
+    sort -t "$tab" -k1,1 -k3,3 | awk -F '\t' -v BF="$bf" -v BL="$bl" '
     BEGIN { s = 1 }
     $1 != dir && (nf >= BF || nl >= BL) { s++; nf = nl = 0 }
     { dir = $1; nf++; nl += $2; print s "\t" $3 }
@@ -389,14 +465,14 @@ if [ "$codefiles" -gt "$SHARD_FILES" ] || [ "$codelines" -gt "$SHARD_LINES" ]; t
 fi
 
 # --- size guard: size.tsv = flag path metric est_tokens suggestion -------------------
-# Token estimate: bytes / 4. Flags: big-pr, big-diff, huge-file, noise (skipped files).
+# Token estimate: bytes / 4. Flags: big-pr, big-review-set, big-diff, huge-file, noise (skipped files).
 awk -F '\t' '$1 != "D" { print $7 }' "$ctx/files.tsv" |
   while IFS= read -r f; do
     [ -f "$f" ] && printf '%s\t%s\t%s\n' "$f" "$(wc -l <"$f" | tr -d ' ')" "$(wc -c <"$f" | tr -d ' ')"
   done >"$tmp/filesize.tsv"
 # all.tsv: sec status added deleted lang kind layer path bytes
 awk -F '\t' -v OFS='\t' -v MD="$MAX_FILE_DIFF" -v ML="$MAX_FILE_LINES" -v SF="$SHARD_FILES" -v SL="$SHARD_LINES" \
-    -v CF="$codefiles" -v CL="$codelines" -v NS="$shards" -v TOT="$tmp/totals" -v OUT="$tmp/size.raw" '
+    -v CF="$codefiles" -v CL="$codelines" -v NS="$shards" -v DEPTH="$depth" -v TOT="$tmp/totals" -v OUT="$tmp/size.raw" '
   FNR == NR { fl[$1] = $2; fb[$1] = $3; next }
   {
     p = $8; n = $3 + $4; t = int(($9 + 3) / 4); b = p; sub(/.*\//, "", b)
@@ -412,18 +488,28 @@ awk -F '\t' -v OFS='\t' -v MD="$MAX_FILE_DIFF" -v ML="$MAX_FILE_LINES" -v SF="$S
   }
   END {
     if (CF > SF || CL > SL)
-      print "big-pr", "-", CF " code files, " CL " changed lines", review + 0, "review shards into " NS " parts per heavy lens; split the PR along shards.tsv" > OUT
+      print "big-pr", "-", CF " code files, " CL " changed lines", review + 0, (DEPTH == "diff" ? "review shards into " NS " parts per heavy lens; split the PR along shards.tsv" : "split the PR into smaller changes") > OUT
     print review + 0, noise + 0 > TOT
   }
 ' "$tmp/filesize.tsv" "$tmp/all.tsv"
+if [ "$bigset" = 1 ]; then
+  printf 'big-review-set\t-\t%s code files, %s lines at depth %s\t%s\t%s\n' "$setcodefiles" "$setcodelines" "$depth" "$tok_set" \
+    "review shards into $shards parts per heavy lens; pick a narrower depth or --exclude paths" >>"$tmp/size.raw"
+fi
 : >"$ctx/size.tsv"
-for flag in big-pr big-diff huge-file noise; do
+for flag in big-pr big-review-set big-diff huge-file noise; do
   [ -f "$tmp/size.raw" ] && awk -F '\t' -v f="$flag" '$1 == f' "$tmp/size.raw" | sort -t "$tab" -k4,4nr -k2,2 >>"$ctx/size.tsv"
 done
 read -r tok_review tok_noise <"$tmp/totals"
 
 # --- Go packages grouped by module ----------------------------------------------
-awk -F '\t' '$4 == "go" && $1 != "D" && $5 != "vendor" { d = $7; if (d !~ /\//) d = "."; else sub(/\/[^\/]*$/, "", d); print d }' "$ctx/files.tsv" |
+# The packages of the changed Go files, or of the review set's at full depth. Directories
+# the go tool ignores (testdata, _x, .x) are left out.
+# scoped: the file listing what is reviewed — files.tsv, or review-set.tsv at full depth.
+scoped=$ctx/files.tsv
+[ "$depth" = diff ] || scoped=$ctx/review-set.tsv
+awk -F '\t' '$4 == "go" && $1 != "D" && $5 != "vendor" { d = $7; if (d !~ /\//) d = "."; else sub(/\/[^\/]*$/, "", d)
+    if (d !~ /(^|\/)(testdata|[_.][^\/]*)(\/|$)/ || d == ".") print d }' "$scoped" |
   sort -u | while IFS= read -r d; do
     [ -d "$d" ] || continue
     m=$d
@@ -435,11 +521,11 @@ awk -F '\t' '$4 == "go" && $1 != "D" && $5 != "vendor" { d = $7; if (d !~ /\//) 
     printf '%s\t%s\n' "$m" "$rel"
   done >"$ctx/packages.tsv"
 
-# --- applicable repo rules (AGENTS.md / CLAUDE.md on the path of changed files) -
+# --- applicable repo rules (AGENTS.md / CLAUDE.md on the path of reviewed files) -
 git -c core.quotePath=false ls-files 'AGENTS.md' '*/AGENTS.md' 'CLAUDE.md' '*/CLAUDE.md' 2>/dev/null |
   awk -F '\t' 'NR == FNR { p[$7] = 1; next }
     { d = $0; sub(/[^\/]*$/, "", d); if (d == "") { print; next }
-      for (f in p) if (index(f, d) == 1) { print; next } }' "$ctx/files.tsv" - >"$ctx/rules.txt"
+      for (f in p) if (index(f, d) == 1) { print; next } }' "$scoped" - >"$ctx/rules.txt"
 
 # --- tools ----------------------------------------------------------------------
 for t in git gh go gopls staticcheck golangci-lint gosec govulncheck dupl checklocks errcheck nilaway \
@@ -453,7 +539,7 @@ done >"$ctx/tools.tsv"
 # release than the active toolchain (analyzers built that way fail on the newer
 # standard library). Checks skip what is missing; the user is told how to install it.
 has_tool() { grep -q "^$1	" "$ctx/tools.tsv"; }
-live_lang() { awk -F '\t' -v l="$1" '$1 != "D" && $4 == l { f = 1; exit } END { exit !f }' "$ctx/files.tsv"; }
+live_lang() { awk -F '\t' -v l="$1" '$1 != "D" && $4 == l { f = 1; exit } END { exit !f }' "$scoped"; }
 gominor() { sed -n 's/.*go\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1; }
 gocur=''
 has_tool go && gocur=$(go env GOVERSION 2>/dev/null | gominor)
@@ -516,6 +602,7 @@ langs=$(awk -F '\t' '$5 != "generated" && $5 != "vendor" { c[$4]++ } END { for (
   echo "run=$run"
   echo "root=$top"
   echo "scope=$desc"
+  echo "depth=$depth"
   echo "head=$head"
   echo "base=$basesha"
   echo "branch=$(git symbolic-ref --short -q HEAD || echo detached)"
@@ -532,6 +619,12 @@ langs=$(awk -F '\t' '$5 != "generated" && $5 != "vendor" { c[$4]++ } END { for (
   echo "refs=$(wc -l <"$ctx/refs.tsv" | tr -d ' ')"
   echo "shards=$shards"
   echo "diff_tokens_est=$tok_review"
+  if [ "$depth" != diff ]; then
+    echo "review_files=$review_files"
+    echo "review_code_files=$setcodefiles"
+    echo "review_lines=$review_lines"
+    echo "review_tokens_est=$tok_set"
+  fi
   echo "noise_tokens_est=$tok_noise"
   echo "size_warnings=$(wc -l <"$ctx/size.tsv" | tr -d ' ')"
   echo "missing_tools=$(wc -l <"$ctx/missing.tsv" | tr -d ' ')"

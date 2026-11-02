@@ -1,6 +1,6 @@
 # Security Sentinel (secrets, data leaks, vulnerabilities)
 
-Mandatory in every run. Assume the diff is hostile until proven safe. For every changed line, try hard to answer "yes":
+Mandatory in every run. Assume the diff is hostile until proven safe. For every in-scope line (every changed line, at `diff` depth), try hard to answer "yes":
 
 1. Does it leak a secret or sensitive data — in a log, error, response, commit, config, fixture, cache, or telemetry?
 2. Can an attacker reach or influence it — untrusted input, unauthenticated path, tenant boundary, privilege edge?
@@ -10,7 +10,7 @@ Think in chains (leak → replay → escalate), including unlikely ones. A suspi
 
 ## Tools
 
-Scanner results are in `checks/summary.tsv`: secrets (`gitleaks`/`trufflehog`, or a `secrets` row saying none is installed), `gosec`, `govulncheck`, `semgrep` (only with a repo config), linters. Start there. You may run another installed tool from `tools.tsv` on changed files only (e.g. `osv-scanner` on a changed lockfile, `conftest` on Rego, `hadolint` on a Dockerfile). Trace taint with `gopls`/LSP; `rg` sweeps supplement, never replace. A missing tool goes to Open checks — the concern still gets a manual pass.
+Scanner results are in `checks/summary.tsv`: secrets (`gitleaks`/`trufflehog`, or a `secrets` row saying none is installed), `gosec`, `govulncheck`, `semgrep` (only with a repo config), linters. Start there. You may run another installed tool from `tools.tsv` on in-scope files only (e.g. `osv-scanner` on a changed lockfile, `conftest` on Rego, `hadolint` on a Dockerfile). Trace taint with `gopls`/LSP; `rg` sweeps supplement, never replace. A missing tool goes to Open checks — the concern still gets a manual pass.
 
 ## Patrol route
 

@@ -4,14 +4,14 @@ Report what affects whether the change should merge, not preferences. Test: woul
 
 Priority: correctness, explicit repo rules, Go idioms, App ↔ Business ↔ Storage boundaries, operational safety, local maintainability.
 
-A failing `go-build`, `go-vet`, or linter row in `checks/` on changed code is a finding — cite the log line. For `.go` files apply `use-modern-go` and `ardan-service-architecture`.
+A failing `go-build`, `go-vet`, or linter row in `checks/` on in-scope code is a finding — cite the log line. For `.go` files apply `use-modern-go` and `ardan-service-architecture`.
 
-Go analyzer rows in `checks/` (changed code only):
+Go analyzer rows in `checks/` (in-scope code only):
 
 - `staticcheck`, `golangci-lint` — each hit is a finding at the Gate its effect warrants.
-- `checklocks` — a violation of an existing `+checklocks`/`+checkatomic` annotation is a data race (G4). "may require checklocks annotation for X" is not a finding by itself: it names the lock that guards those fields, so verify the changed code holds it on every access.
+- `checklocks` — a violation of an existing `+checklocks`/`+checkatomic` annotation is a data race (G4). "may require checklocks annotation for X" is not a finding by itself: it names the lock that guards those fields, so verify the in-scope code holds it on every access.
 - `nilaway` — candidate nil dereferences. Confirm the nil flow can happen before reporting; unconfirmed ones go to Open checks.
-- `go-fix` — a modernizer diff on changed lines: G1 (G2 where `use-modern-go` makes it a rule).
+- `go-fix` — a modernizer diff on in-scope lines: G1 (G2 where `use-modern-go` makes it a rule).
 - `gofmt` (file not formatted) and `go-mod-tidy` (`go.mod`/`go.sum` not tidy) — G2.
 - `apidiff` — incompatible exported-API changes: confirm every caller in the repo was updated (step 1); an unannounced break of a library package is G3.
 
@@ -27,7 +27,7 @@ Go analyzer rows in `checks/` (changed code only):
 
 - **G4** — compile break, data race, security/authz hole, data loss, explicit AGENTS.md or boundary violation.
 - **G3** — likely production bug: nil/error mishandling, leaked resource, wrong transaction, non-idempotent behavior.
-- **G2** — real convention or maintainability problem in the diff.
+- **G2** — real convention or maintainability problem in scope.
 - **G1** — small naming or idiom cleanup.
 
 ## Extra fields

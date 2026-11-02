@@ -1,8 +1,8 @@
 # Doc Drift Check (comment truthfulness)
 
-Treat each changed comment, doc string, README/manual section (`kind=doc`), and TODO/FIXME as a contract and check the code honors it. A comment earns its place by explaining intent, constraints, or domain rules the code doesn't make obvious.
+Treat each in-scope comment, doc string, README/manual section (`kind=doc`), and TODO/FIXME as a contract (at `diff` depth: the changed ones, plus unchanged ones the change makes false) and check the code honors it. A comment earns its place by explaining intent, constraints, or domain rules the code doesn't make obvious.
 
-Flag comments that contradict the code, promise behavior it lacks, omit an important caveat on an exported API, narrate obvious code, carry outdated assumptions, or freeze temporary context as design. In changed docs, check commands, flags, config keys, and examples against the code.
+Flag comments that contradict the code, promise behavior it lacks, omit an important caveat on an exported API, narrate obvious code, carry outdated assumptions, or freeze temporary context as design. In in-scope docs, check commands, flags, config keys, and examples against the code.
 
 ## Language lens
 
@@ -13,8 +13,8 @@ Flag comments that contradict the code, promise behavior it lacks, omit an impor
 
 ## Patrol route
 
-1. **Claims** (working notes, not reported): what each changed comment asserts — inputs, outputs, errors, side effects, ordering, concurrency, invariants, ownership.
-2. **Match** each claim against the changed code and the unchanged code it describes.
+1. **Claims** (working notes, not reported): what each in-scope comment asserts — inputs, outputs, errors, side effects, ordering, concurrency, invariants, ownership.
+2. **Match** each claim against the code it describes, changed or not.
 3. **Decide**: rewrite stale or incomplete claims, remove narration. Accurate comments aren't reported.
 
 ## Gates
