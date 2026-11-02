@@ -229,7 +229,10 @@ $patches = @(Join-Path $ctx 'diff.patch')
 $setCopy = ''
 if ((Has 'gitleaks') -and $depth -ne 'diff') {
     $setCopy = Join-Path ([IO.Path]::GetTempPath()) ('checks-set-' + [guid]::NewGuid().ToString('N'))
+    # Never follow a symlink out of the repo (intake already leaves them out of the set).
     foreach ($f in @(Live '*')) {
+        $item = Get-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+        if (-not $item -or $item.LinkType -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
         $dst = Join-Path $setCopy $f
         New-Item -ItemType Directory -Path (Split-Path -Parent $dst) -Force | Out-Null
         Copy-Item -LiteralPath $f -Destination $dst

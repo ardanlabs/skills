@@ -400,7 +400,12 @@ if [ "$depth" != diff ]; then
     $0 == "" || index($0, RD) == 1 || $0 ~ /(^|\/)\.reviews\// { next }
     { for (x in X) if ($0 == x || index($0, x "/") == 1) next
       l = lang($0); k = kind($0, l)
-      if (k != "generated" && k != "vendor") print l, k, layer($0), $0 }' "$tmp/excl" - >"$tmp/set.cls"
+      if (k != "generated" && k != "vendor") print l, k, layer($0), $0 }' "$tmp/excl" - >"$tmp/set.raw"
+  # Regular files only: a symlink can point outside the repo (~/.aws/credentials) and would
+  # put that file in front of every reviewer. Shell builtins only, so no fork per file.
+  while IFS="$tab" read -r l k ly p; do
+    [ -L "$p" ] || [ ! -f "$p" ] || printf '%s\t%s\t%s\t%s\n' "$l" "$k" "$ly" "$p"
+  done <"$tmp/set.raw" >"$tmp/set.cls"
   # Batched over all candidates (xargs): per-file forks are too slow for a whole repo. Paths
   # get a ./ prefix so awk never reads one as a var=value assignment.
   # files0 LANG_RE: "./path" of the set.cls rows whose lang matches, NUL-separated

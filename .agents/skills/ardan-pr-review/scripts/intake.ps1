@@ -427,6 +427,9 @@ try {
         foreach ($f in $fileRecs) { $chg[$f.Path] = $f }
         foreach ($c in $cls) {
             if ($lg.ContainsKey($c.Path) -or -not (Test-Path -LiteralPath $c.Path -PathType Leaf)) { continue }
+            # Regular files only: a symlink can point outside the repo (~/.aws/credentials).
+            $item = Get-Item -LiteralPath $c.Path -Force
+            if ($item.LinkType -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
             $raw = [IO.File]::ReadAllBytes((Join-Path $top $c.Path))
             if ($raw.Length -eq 0 -or [Array]::IndexOf($raw, [byte]0) -ge 0) { continue }  # empty or binary
             $text = $latin1.GetString($raw)

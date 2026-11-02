@@ -228,8 +228,10 @@ fi
 # only on request, by the generated-scan agent (see references/roles/generated-scan.md).
 if has gitleaks && [ "$scoped" != "$ctx/files.tsv" ]; then
   if setcopy=$(mktemp -d); then
+    # Never follow a symlink out of the repo (intake already leaves them out of the set).
     live '*' | while IFS= read -r f; do
-      mkdir -p "$setcopy/$(dirname -- "$f")" && cp -p -- "$f" "$setcopy/$f"
+      [ -L "$f" ] && continue
+      mkdir -p "$setcopy/$(dirname -- "$f")" && cp -P -p -- "$f" "$setcopy/$f"
     done
     if gitleaks help dir >/dev/null 2>&1; then
       # shellcheck disable=SC2016 # $1 expands in the child shell
