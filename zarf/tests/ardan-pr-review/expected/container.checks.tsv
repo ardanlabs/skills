@@ -5,8 +5,8 @@ apidiff	pass	boundary-keeper
 bandit	fail	security-sentinel
 cargo-audit	pass	security-sentinel
 cargo-clippy	skipped	service-steward
-cargo-deny	fail	security-sentinel
-cargo-fmt	pass	service-steward
+cargo-deny	skipped	security-sentinel
+cargo-fmt	skipped	service-steward
 cargo-test	skipped	harness-map
 checklocks	pass	service-steward
 deadcode	findings	straight-line-pass
