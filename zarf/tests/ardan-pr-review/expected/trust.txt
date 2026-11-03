@@ -1,0 +1,9 @@
+# perm=write cross=false
+trust=maintainer
+trust_reason=maint has write access to fx/fx; head branch in fx/fx
+# perm=read cross=false
+trust=untrusted
+trust_reason=maint has read access to fx/fx
+# perm=write cross=true
+trust=untrusted
+trust_reason=PR head branch is in a fork

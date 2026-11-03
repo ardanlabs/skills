@@ -1,0 +1,2 @@
+terraform	infra/locked	1	tofu
+terraform	infra/nolock	1	tofu

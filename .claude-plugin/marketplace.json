@@ -46,14 +46,20 @@
       "skills": [
         "./.agents/skills/ardan-pr-review"
       ],
-      "description": "Guided, read-only PR review: scripted preprocessing and checks run once, parallel lens agents (security, acceptance criteria, correctness, tests, polish) read a shared brief, and an issues-only report plus color-coded Mermaid diagrams are written per run.",
+      "description": "Guided, read-only PR review for code and infrastructure in any language: scripted preprocessing and per-ecosystem static analysis run once, a discovery agent adapts the run to the repo's stack and quality gates, parallel lens agents (security, acceptance criteria, correctness, tests, polish) read a shared brief, and an issues-only report plus color-coded Mermaid diagrams are written per run.",
       "category": "code-review",
       "keywords": [
         "review",
         "pull-request",
         "security",
         "acceptance-criteria",
-        "go"
+        "go",
+        "rust",
+        "python",
+        "terraform",
+        "kubernetes",
+        "helm",
+        "infrastructure"
       ],
       "license": "Apache-2.0",
       "repository": "https://github.com/ardanlabs/skills"

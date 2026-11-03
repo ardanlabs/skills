@@ -1,0 +1,2 @@
+noise	app/fx/zz_generated.go	generated 5 lines	62	skipped: generated/vendored files are not reviewed unless opted in; keep them out of the PR
+noise	app/fx/hosts-link	symlink 1 lines	47	skipped: symlinks are never reviewed (the target can be outside the repo)
