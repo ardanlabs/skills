@@ -9,8 +9,8 @@
 # Rust builds, Terraform init/validate, tflint plugins, mypy and Ansible plugins, repo gates) run
 # only when scope.txt says trust=maintainer (a maintainer PR, see intake.sh); otherwise they are
 # skipped and the rest run against neutral configs. Nothing writes to the working tree beyond
-# build caches (Go cache, cargo target/): Terraform init uses a temp TF_DATA_DIR and a read-only
-# lock file; Python checks run without caches or bytecode.
+# build caches (Go cache, cargo target/): Terraform init uses a temp TF_DATA_DIR and leaves the
+# lock file as it was; Python checks run without caches or bytecode.
 # Output: RUN_DIR/context/checks/<check>.txt (full log) and RUN_DIR/context/checks/summary.tsv
 # (check status exit lines file lens). Prints the summary.
 #   --env K=V      exported for every check (e.g. GITHUB_WORKSPACE=/repo); repeatable
@@ -309,23 +309,25 @@ fi
 
 # --- Terraform / OpenTofu, per module --------------------------------------------------
 # The stack marker names the binary (terraform or tofu). init downloads providers and modules
-# into a temp TF_DATA_DIR; an existing .terraform.lock.hcl is never rewritten
-# (-lockfile=readonly), and one that init creates is removed again.
+# into a temp TF_DATA_DIR. init may add this platform's hashes to .terraform.lock.hcl (validate
+# needs them; a read-only lock fails wherever the lock lacks them), so the file is restored
+# byte for byte afterwards, and one that init creates is removed. Locked versions still apply.
 tfbin=$(awk -F '\t' '$1 == "terraform" { print $4; exit }' "$ctx/stack.tsv" 2>/dev/null)
 tf_fmt() { rc=0; for f in "$@"; do "$tfbin" fmt -check -diff -no-color "$f" || rc=$?; done; return $rc; }
 tf_validate() {
   d=$(mktemp -d) || return 1
-  lock=-lockfile=readonly
-  [ -f .terraform.lock.hcl ] || lock=''
-  # shellcheck disable=SC2086 # $lock is one flag or nothing
-  TF_DATA_DIR=$d "$tfbin" init -backend=false -input=false $lock -no-color >"$d.init" 2>&1
+  bak=''
+  if [ -f .terraform.lock.hcl ]; then bak=$d.lock; cp .terraform.lock.hcl "$bak" || return 1; fi
+  TF_DATA_DIR=$d "$tfbin" init -backend=false -input=false -no-color >"$d.init" 2>&1
   rc=$?
   if [ $rc = 0 ]; then TF_DATA_DIR=$d "$tfbin" validate -no-color; rc=$?
   else echo "# init failed (providers, modules, or credentials):"; cat "$d.init"
   fi
-  # validate needs the lock file init wrote; remove it only afterwards
-  [ -n "$lock" ] || rm -f .terraform.lock.hcl
-  rm -rf "$d" "$d.init"; return $rc
+  # validate needs the lock file init wrote: put the original back only afterwards
+  if [ -z "$bak" ]; then rm -f .terraform.lock.hcl
+  elif ! cmp -s "$bak" .terraform.lock.hcl; then cat "$bak" >.terraform.lock.hcl
+  fi
+  rm -rf "$d" "$d.init" "$bak"; return $rc
 }
 # tf_lint: the repo's .tflint.hcl (and its plugins) only for a maintainer PR; otherwise a
 # neutral config with the bundled rules and no plugin installation.

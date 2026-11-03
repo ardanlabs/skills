@@ -156,10 +156,12 @@ if [ "$before" = "$after" ]; then pass "working tree unchanged by maintainer-PR 
 else fail "working tree changed by maintainer-PR checks"; printf '%s\n' "$after" | sed 's/^/      /'
 fi
 
-# --- container: OpenTofu selection and its read-only lock -------------------------------------
+# --- container: OpenTofu, as a maintainer PR so init/validate run ------------------------------
+# tofu init rewrites the Terraform-made lock file (registry addresses, hashes): the checks must
+# put it back byte for byte.
 if [ "$mode" = container ]; then
   echo 1.13.0 >.opentofu-version
-  intake_pair tofu "--base main" "-Base main"
+  PATH=$work/ghbin:$PATH FX_GH_PERM=write FX_GH_CROSS=false intake_pair tofu "--pr 1" "-Pr 1"
   grep '^terraform' .reviews/sh/tofu/001/context/stack.tsv >"$work/tofu.stack"; golden tofu.stack.tsv "$work/tofu.stack"
   checks_pair tofu
   grep -E '^(tf|tflint)' "$work/c1" >"$work/tofu.view"; golden tofu.checks.tsv "$work/tofu.view"

@@ -58,7 +58,7 @@ Plugin skills are namespaced, so `ardan-pr-review` is invoked as `/ardan-pr-revi
 | `semgrep`                            | the repo's own semgrep rules, when it has them  | `python3 -m pip install semgrep`                                             |
 | `cargo` (`fmt --check`, `clippy`, `test`) | Rust format, lints, tests (`--locked`)     | [rustup.rs](https://rustup.rs); `rustup component add clippy rustfmt`        |
 | `cargo-audit`, `cargo-deny`          | Rust advisories; licenses and sources (`deny.toml`) | `cargo install cargo-audit cargo-deny --locked`                          |
-| `terraform` or `tofu` (`fmt`, `init -backend=false`, `validate`) | Terraform/OpenTofu format and validation; init uses a temp data dir and never rewrites the lock file | [terraform](https://developer.hashicorp.com/terraform/install), [opentofu](https://opentofu.org/docs/intro/install/) |
+| `terraform` or `tofu` (`fmt`, `init -backend=false`, `validate`) | Terraform/OpenTofu format and validation; init uses a temp data dir and leaves the lock file as it was | [terraform](https://developer.hashicorp.com/terraform/install), [opentofu](https://opentofu.org/docs/intro/install/) |
 | `tflint`                             | Terraform lint (repo `.tflint.hcl`)             | [tflint#installation](https://github.com/terraform-linters/tflint#installation) |
 | `helm` (`lint`, `template`)          | chart lint and render                           | [helm.sh](https://helm.sh/docs/intro/install/)                               |
 | `kustomize` or `kubectl kustomize`   | render Kustomize roots                          | `go install sigs.k8s.io/kustomize/kustomize/v5@latest`                       |

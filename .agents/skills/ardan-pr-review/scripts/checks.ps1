@@ -290,8 +290,9 @@ if ($rustUnits.Count) {
 
 # --- Terraform / OpenTofu, per module --------------------------------------------------
 # The stack marker names the binary (terraform or tofu). init downloads providers and modules
-# into a temp TF_DATA_DIR; an existing .terraform.lock.hcl is never rewritten
-# (-lockfile=readonly), and one that init creates is removed again.
+# into a temp TF_DATA_DIR. init may add this platform's hashes to .terraform.lock.hcl (validate
+# needs them; a read-only lock fails wherever the lock lacks them), so the file is restored
+# byte for byte afterwards, and one that init creates is removed. Locked versions still apply.
 $tfRow = $stack | Where-Object { $_[0] -ceq 'terraform' } | Select-Object -First 1
 $tfBin = if ($tfRow) { $tfRow[3] } else { '' }
 $tfFmtFn = {
@@ -303,14 +304,15 @@ $tfValidateFn = {
     $d = Join-Path ([IO.Path]::GetTempPath()) ('tf-data-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $d | Out-Null
     $env:TF_DATA_DIR = $d
-    $hadLock = Test-Path -LiteralPath '.terraform.lock.hcl'
-    $lock = @(if ($hadLock) { '-lockfile=readonly' })
-    $init = @(& $bin init -backend=false -input=false @lock -no-color 2>&1 | ForEach-Object { "$_" })
+    $lockPath = Join-Path (Get-Location).Path '.terraform.lock.hcl'
+    $orig = if (Test-Path -LiteralPath $lockPath) { [IO.File]::ReadAllBytes($lockPath) } else { $null }
+    $init = @(& $bin init -backend=false -input=false -no-color 2>&1 | ForEach-Object { "$_" })
     $initRc = $LASTEXITCODE
     if ($initRc -ne 0) { $st.rc = $initRc; '# init failed (providers, modules, or credentials):'; $init }
     else { & $bin validate -no-color 2>&1 | ForEach-Object { "$_" }; $st.rc = $LASTEXITCODE }
-    # validate needs the lock file init wrote; remove it only afterwards
-    if (-not $hadLock) { Remove-Item -LiteralPath '.terraform.lock.hcl' -Force -ErrorAction SilentlyContinue }
+    # validate needs the lock file init wrote: put the original back only afterwards
+    if ($null -eq $orig) { Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue }
+    elseif (-not (Test-Path -LiteralPath $lockPath) -or [Convert]::ToBase64String([IO.File]::ReadAllBytes($lockPath)) -cne [Convert]::ToBase64String($orig)) { [IO.File]::WriteAllBytes($lockPath, $orig) }
     Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
 }
 # The repo's .tflint.hcl (and its plugins) only for a maintainer PR; otherwise a neutral config
