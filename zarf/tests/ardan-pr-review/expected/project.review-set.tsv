@@ -1,4 +1,5 @@
 M	2	0	ci	prod	-	.github/workflows/ci.yml	9
+-	0	0	yaml	config	-	.golangci.yml	7
 -	0	0	other	prod	-	.yamllint	3
 M	2	2	docker	prod	-	Dockerfile	2
 M	10	0	go	prod	app	app/fx/main.go	21

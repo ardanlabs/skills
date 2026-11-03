@@ -753,7 +753,7 @@ try {
             Need 'gopls' 'symbol lookups by reviewers' 'go install golang.org/x/tools/gopls@latest' -Go
             Need 'staticcheck' 'staticcheck' 'go install honnef.co/go/tools/cmd/staticcheck@latest' -Go
             $mods = @($pk | ForEach-Object { ($_ -split "`t")[0] } | Select-Object -Unique)
-            if ($mods | Where-Object { Get-ChildItem -LiteralPath $_ -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -cmatch '^\.golangci\.(ya?ml|toml|json)$' } }) {
+            if ($mods | Where-Object { Get-ChildItem -LiteralPath $_ -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -cmatch '^\.golangci\.(ya?ml|toml|json)$' } }) {
                 Need 'golangci-lint' 'repo golangci-lint config' 'go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest' -Go
             }
             Need 'gosec' 'Go security scan' 'go install github.com/securego/gosec/v2/cmd/gosec@latest' -Go

@@ -179,11 +179,12 @@ for m in $modules; do
     elif [ -z "$testpkgs" ]; then skip "go-test$sfx" "all packages excluded"
     else job "go-test$sfx" go test -race -count=1 -timeout "$timeout" $testpkgs
     fi
-    if ls .golangci.y*ml .golangci.toml .golangci.json >/dev/null 2>&1; then
-      # custom linters load plugin code named in the repo's config
-      if ! runs_code && grep -Eqs '^[[:space:]]*custom[[:space:]]*[:=]' .golangci.*; then skip "golangci-lint$sfx" "$UNTRUSTED (custom linter plugins)"
-      elif has golangci-lint; then job "golangci-lint$sfx" golangci-lint run $pkgs
-      else skip "golangci-lint$sfx" "golangci-lint not installed"
+    if [ -e .golangci.yml ] || [ -e .golangci.yaml ] || [ -e .golangci.toml ] || [ -e .golangci.json ]; then
+      # The repo's config can load custom linter plugins: read it only for a maintainer PR;
+      # otherwise --no-config runs the default linters and never parses that file.
+      if ! has golangci-lint; then skip "golangci-lint$sfx" "golangci-lint not installed"
+      elif runs_code; then job "golangci-lint$sfx" golangci-lint run $pkgs
+      else job "golangci-lint$sfx" golangci-lint run --no-config $pkgs
       fi
     fi
     if has staticcheck; then job "staticcheck$sfx" staticcheck $pkgs; else skip "staticcheck$sfx" "staticcheck not installed"; fi

@@ -20,6 +20,8 @@ mkdir -p app/fx crates/core/src infra/nolock infra/locked charts/api/templates d
 
 # --- base ------------------------------------------------------------------------------
 printf 'module example.com/fx\n\ngo 1.24\n' >go.mod
+# A custom linter plugin: golangci-lint may read this config only for a maintainer PR.
+printf 'version: "2"\nlinters:\n  enable: [evil]\n  settings:\n    custom:\n      evil:\n        path: ./evil.so\n' >.golangci.yml
 cat >app/fx/main.go <<'EOF'
 package main
 

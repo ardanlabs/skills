@@ -17,6 +17,7 @@ ARG KUBE_LINTER_VERSION=0.8.3
 ARG ACTIONLINT_VERSION=1.7.12
 ARG KUSTOMIZE_VERSION=5.8.3
 ARG GITLEAKS_VERSION=8.30.1
+ARG GOLANGCI_LINT_VERSION=2.15.0
 ARG STATICCHECK_VERSION=0.8.2
 ARG GOVULNCHECK_VERSION=1.9.0
 ARG GOSEC_VERSION=2.30.0
@@ -74,6 +75,7 @@ RUN go install golang.stackrox.io/kube-linter/cmd/kube-linter@v${KUBE_LINTER_VER
 RUN go install github.com/rhysd/actionlint/cmd/actionlint@v${ACTIONLINT_VERSION} && go clean -cache
 RUN go install sigs.k8s.io/kustomize/kustomize/v5@v${KUSTOMIZE_VERSION} && go clean -cache
 RUN go install github.com/zricethezav/gitleaks/v8@v${GITLEAKS_VERSION} && go clean -cache
+RUN go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v${GOLANGCI_LINT_VERSION} && go clean -cache
 RUN go install honnef.co/go/tools/cmd/staticcheck@v${STATICCHECK_VERSION} \
  && go install golang.org/x/vuln/cmd/govulncheck@v${GOVULNCHECK_VERSION} \
  && go install github.com/securego/gosec/v2/cmd/gosec@v${GOSEC_VERSION} \

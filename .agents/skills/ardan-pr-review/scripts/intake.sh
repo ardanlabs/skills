@@ -730,6 +730,8 @@ eco() { awk -F '\t' -v e="$1" -v m="${2-}" '$1 == e && (m == "" || $4 == m) { f 
 repo_has() { grep -Eq "$1" "$tmp/repo.files"; }
 
 # --- missing.tsv: tool needed_for fix ---------------------------------------------
+# any_file PATH...: true when at least one PATH exists (`ls a b` fails if any one is missing)
+any_file() { for f in "$@"; do [ -e "$f" ] && return 0; done; return 1; }
 # Tools this change needs but that are absent, or Go tools built with an older Go
 # release than the active toolchain (analyzers built that way fail on the newer
 # standard library). Checks skip what is missing; the user is told how to install it.
@@ -757,7 +759,7 @@ need() {  # need TOOL NEEDED_FOR INSTALL [go]: record TOOL if missing (or stale,
     need gopls "symbol lookups by reviewers" "go install golang.org/x/tools/gopls@latest" go
     need staticcheck "staticcheck" "go install honnef.co/go/tools/cmd/staticcheck@latest" go
     cut -f1 "$ctx/packages.tsv" | sort -u | while IFS= read -r m; do
-      if ls "$m"/.golangci.y*ml "$m"/.golangci.toml "$m"/.golangci.json >/dev/null 2>&1; then
+      if any_file "$m"/.golangci.yml "$m"/.golangci.yaml "$m"/.golangci.toml "$m"/.golangci.json; then
         need golangci-lint "repo golangci-lint config" \
           "go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest" go
         break
@@ -826,7 +828,7 @@ need() {  # need TOOL NEEDED_FOR INSTALL [go]: record TOOL if missing (or stale,
     need zizmor "GitHub Actions security" "python3 -m pip install zizmor"
   fi
   has_tool trufflehog || need gitleaks "secret scan" "go install github.com/zricethezav/gitleaks/v8@latest"
-  if ls .semgrep.yml .semgrep.yaml .semgrep >/dev/null 2>&1; then
+  if any_file .semgrep.yml .semgrep.yaml .semgrep; then
     need semgrep "repo semgrep rules" "python3 -m pip install semgrep"
   fi
 } >"$ctx/missing.tsv"

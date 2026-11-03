@@ -19,6 +19,7 @@ go-mod-tidy	pass	service-steward
 go-test	fail	harness-map
 go-vet	fail	service-steward
 gofmt	findings	service-steward
+golangci-lint	fail	service-steward
 gosec	pass	security-sentinel
 govulncheck	pass	security-sentinel
 hadolint	fail	service-steward

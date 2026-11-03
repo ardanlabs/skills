@@ -116,6 +116,11 @@ cp "$work/extra.tsv" .reviews/sh/diff/001/context/extra-checks.tsv
 cp "$work/extra.tsv" .reviews/ps/diff/001/context/extra-checks.tsv
 checks_pair diff "--extra echo-x" "-Extra echo-x"
 checks_view .reviews/sh/diff/001 >"$work/checks.view"; golden "$mode.checks.tsv" "$work/checks.view"
+# untrusted: golangci-lint never reads the repo's config (it names a custom plugin)
+for p in sh ps; do
+  if grep -q -- '--no-config' ".reviews/$p/diff/001/context/checks/golangci-lint.txt"; then pass "golangci-lint --no-config when untrusted ($p)"
+  else fail "golangci-lint read the repo config when untrusted ($p)"; fi
+done
 after=$(tree_state)
 if [ "$before" = "$after" ]; then pass "working tree unchanged by checks"
 else fail "working tree changed by checks"; printf '%s\n' "$after" | sed 's/^/      /'
@@ -141,6 +146,10 @@ cp "$work/extra.tsv" .reviews/sh/pr-write-false/001/context/extra-checks.tsv
 cp "$work/extra.tsv" .reviews/ps/pr-write-false/001/context/extra-checks.tsv
 checks_pair pr-write-false "--extra echo-x" "-Extra echo-x"
 checks_view .reviews/sh/pr-write-false/001 >"$work/trusted.view"; golden "$mode.trusted.checks.tsv" "$work/trusted.view"
+for p in sh ps; do
+  if head -n 1 ".reviews/$p/pr-write-false/001/context/checks/golangci-lint.txt" | grep -q -- '--no-config'; then fail "golangci-lint ignored the repo config for a maintainer PR ($p)"
+  else pass "golangci-lint uses the repo config for a maintainer PR ($p)"; fi
+done
 PATH=$path0
 after=$(tree_state)
 if [ "$before" = "$after" ]; then pass "working tree unchanged by maintainer-PR checks"

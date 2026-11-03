@@ -20,6 +20,7 @@ go-mod-tidy	pass	service-steward
 go-test	skipped	harness-map
 go-vet	pass	service-steward
 gofmt	findings	service-steward
+golangci-lint	pass	service-steward
 gosec	pass	security-sentinel
 govulncheck	pass	security-sentinel
 hadolint	pass	service-steward

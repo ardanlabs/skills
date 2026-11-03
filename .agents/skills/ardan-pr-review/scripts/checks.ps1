@@ -201,13 +201,13 @@ foreach ($m in $modules) {
     elseif (-not $tests) { Skip "go-test$sfx" '--no-tests' }
     elseif (-not $testPkgs.Count) { Skip "go-test$sfx" 'all packages excluded' }
     else { Job "go-test$sfx" $dir 'go' (@('test', '-race', '-count=1', '-timeout', $Timeout) + $testPkgs) }
-    $golangciCfg = @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -cmatch '^\.golangci\.(ya?ml|toml|json)$' })
+    $golangciCfg = @(Get-ChildItem -LiteralPath $dir -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -cmatch '^\.golangci\.(ya?ml|toml|json)$' })
     if ($golangciCfg.Count) {
-        # custom linters load plugin code named in the repo's config
-        $customLinters = [bool](@($golangciCfg | ForEach-Object { [IO.File]::ReadAllLines($_.FullName) }) -cmatch '^\s*custom\s*[:=]')
-        if (-not $runsCode -and $customLinters) { Skip "golangci-lint$sfx" "$untrusted (custom linter plugins)" }
-        elseif (Has 'golangci-lint') { Job "golangci-lint$sfx" $dir 'golangci-lint' (@('run') + $pkgs) }
-        else { Skip "golangci-lint$sfx" 'golangci-lint not installed' }
+        # The repo's config can load custom linter plugins: read it only for a maintainer PR;
+        # otherwise --no-config runs the default linters and never parses that file.
+        if (-not (Has 'golangci-lint')) { Skip "golangci-lint$sfx" 'golangci-lint not installed' }
+        elseif ($runsCode) { Job "golangci-lint$sfx" $dir 'golangci-lint' (@('run') + $pkgs) }
+        else { Job "golangci-lint$sfx" $dir 'golangci-lint' (@('run', '--no-config') + $pkgs) }
     }
     if (Has 'staticcheck') { Job "staticcheck$sfx" $dir 'staticcheck' $pkgs } else { Skip "staticcheck$sfx" 'staticcheck not installed' }
     if (Has 'checklocks') { Job "checklocks$sfx" $dir 'go' (@('vet', "-vettool=$($tools['checklocks'])") + $pkgs) }

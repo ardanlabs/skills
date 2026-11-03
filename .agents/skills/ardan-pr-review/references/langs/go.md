@@ -3,7 +3,7 @@
 **Tools:** `gopls` MCP (`go_symbol_references`, `go_search`, `go_file_context`), else `gopls`/`go doc`, then `rg`. Skills: `use-modern-go` on every `.go` file; `ardan-service-architecture` on files with a `layer` (`app`, `business`, `storage`, `foundation`) — `references/types.md` for boundaries, `branching.md` for conditionals, `events.md` for domain events, `extensions.md` only when extension wiring is touched.
 
 **Checks** (`checks/summary.tsv`; package-wide tools report on whole packages, only in-scope hits count):
-- `go-build`, `go-vet`, `staticcheck`, `golangci-lint` — each hit is a finding at the Gate its effect warrants. (`golangci-lint` is skipped for an untrusted change whose config loads custom linter plugins.)
+- `go-build`, `go-vet`, `staticcheck`, `golangci-lint` — each hit is a finding at the Gate its effect warrants. (For an untrusted change `golangci-lint` runs with `--no-config`: default linters, since the repo's config can load custom linter plugins.)
 - `checklocks` — a violation of an existing `+checklocks`/`+checkatomic` annotation is a data race (G4). "may require checklocks annotation for X" names the lock guarding those fields: verify in-scope code holds it on every access.
 - `nilaway` — candidate nil dereferences; confirm the nil flow before reporting, else Open check.
 - `go-fix` — modernizer diff on in-scope lines: G1 (G2 where `use-modern-go` makes it a rule). `gofmt`, `go-mod-tidy` — G2.
