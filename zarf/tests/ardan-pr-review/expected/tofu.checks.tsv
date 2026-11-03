@@ -1,0 +1,5 @@
+tf-fmt	fail	service-steward
+tf-validate@infra_locked	fail	service-steward
+tf-validate@infra_nolock	fail	service-steward
+tflint@infra_locked	fail	service-steward
+tflint@infra_nolock	fail	service-steward

@@ -2,34 +2,25 @@
 
 Report what affects whether the change should merge, not preferences. Test: would a careful reviewer block or request changes? If not, it's G1 at most.
 
-Priority: correctness, explicit repo rules, Go idioms, App ↔ Business ↔ Storage boundaries, operational safety, local maintainability.
+Priority: correctness, explicit repo rules, the language's idioms, architecture and layer boundaries, operational safety, local maintainability. Use the **Correctness** section and the **Checks** line of each idiom file in your prompt.
 
-A failing `go-build`, `go-vet`, or linter row in `checks/` on in-scope code is a finding — cite the log line. For `.go` files apply `use-modern-go` and `ardan-service-architecture`.
-
-Go analyzer rows in `checks/` (in-scope code only):
-
-- `staticcheck`, `golangci-lint` — each hit is a finding at the Gate its effect warrants.
-- `checklocks` — a violation of an existing `+checklocks`/`+checkatomic` annotation is a data race (G4). "may require checklocks annotation for X" is not a finding by itself: it names the lock that guards those fields, so verify the in-scope code holds it on every access.
-- `nilaway` — candidate nil dereferences. Confirm the nil flow can happen before reporting; unconfirmed ones go to Open checks.
-- `go-fix` — a modernizer diff on in-scope lines: G1 (G2 where `use-modern-go` makes it a rule).
-- `gofmt` (file not formatted) and `go-mod-tidy` (`go.mod`/`go.sum` not tidy) — G2.
-- `apidiff` — incompatible exported-API changes: confirm every caller in the repo was updated (step 1); an unannounced break of a library package is G3.
+A `fail` or `findings` row with `lens=service-steward` in `checks/` on in-scope code is a finding — cite the log line. That covers builds, compilers, type checkers, linters, formatters (G2 unless the repo makes formatting a gate), renderers and validators (`helm-render`, `kustomize`, `tf-validate`, `kubeconform`), and approved repo gates (`x-*`). A failure caused by the environment (missing credentials, registry, chart dependencies, toolchain) is an Open check: say what is needed.
 
 ## Patrol route
 
-1. **Surface and contract.** Broken signatures, changed exported APIs not updated at call sites (callers are in `brief.md`), surprising zero values, `context` misuse (stored, not propagated, cancellation ignored).
-2. **Runtime correctness.** Nil derefs, off-by-one and slice/map bounds, data races, leaked goroutines or resources (rows, bodies, files), wrong transaction scope, authorization regressions.
-3. **Architectural fit.** Primitives at API/DB edges; strong `business/types/*` in Business; crossings via `toBus<Type>` / `fromBus<Type>Response` / `toDB<Type>`; cross-cutting concerns via the `ExtBusiness`/`Extension` seam; shallow branching.
-4. **Maintainability.** Only material issues: drift-prone duplication, unclear ownership, avoidable coupling, hidden side effects, names that hide domain meaning.
-5. **Other languages**, same intent in their idiom: Vue/JS/TS contracts, reactivity, leaks, unhandled async, a11y; Rego default deny; proto compatibility; SQL migration safety; Helm limits, probes, secrets; shell `set -euo pipefail`, quoting, exit codes.
+1. **Surface and contract.** Broken signatures or interfaces, changed public APIs, module inputs, values keys, or resource addresses not updated at their users (callers are in `brief.md` and `refs.tsv`).
+2. **Runtime correctness.** Per the idiom files: nil/None/unwrap, bounds, concurrency, leaked resources, wrong transaction scope, authorization regressions; for infrastructure, destroy/replace of stateful resources, broken rollouts, immutable-field changes, drift between environments.
+3. **Architectural fit.** The architecture the repo and its idiom files define (Go: Ardan layering and the `ExtBusiness`/`Extension` seam; others: the module, chart, or role structure already in the repo).
+4. **Operational safety.** Config that only works in one environment, missing limits/timeouts/probes, changes that need a coordinated rollout with no note.
+5. **Maintainability.** Only material issues: drift-prone duplication, unclear ownership, avoidable coupling, hidden side effects, names that hide domain meaning.
 
 ## Gates
 
-- **G4** — compile break, data race, security/authz hole, data loss, explicit AGENTS.md or boundary violation.
-- **G3** — likely production bug: nil/error mishandling, leaked resource, wrong transaction, non-idempotent behavior.
+- **G4** — compile/render/validate break, data race, security/authz hole, data loss or destroyed stateful resource, explicit AGENTS.md or boundary violation.
+- **G3** — likely production bug: nil/error mishandling, leaked resource, wrong transaction, non-idempotent behavior, failed rollout.
 - **G2** — real convention or maintainability problem in scope.
 - **G1** — small naming or idiom cleanup.
 
 ## Extra fields
 
-- Rule: the AGENTS.md rule, skill, or Go convention involved
+- Rule: the AGENTS.md rule, skill, linter rule, or language convention involved

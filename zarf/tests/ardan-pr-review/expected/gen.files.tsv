@@ -1,0 +1,15 @@
+M	2	0	ci	prod	-	.github/workflows/ci.yml
+M	2	2	docker	prod	-	Dockerfile
+M	10	0	go	prod	app	app/fx/main.go
+A	5	0	go	generated	app	app/fx/zz_generated.go
+M	1	0	helm	prod	-	charts/api/templates/_helpers.tpl
+M	2	2	helm	prod	-	charts/api/values.yaml
+M	12	0	rust	prod	-	crates/core/src/lib.rs
+M	1	1	k8s	prod	-	deploy/base/deploy.yaml
+M	3	0	tf	prod	-	infra/locked/main.tf
+M	4	0	tf	prod	-	infra/nolock/main.tf
+M	1	0	java	prod	-	java/Foo.java
+M	1	0	k8s	prod	-	k8s/cm.yaml
+M	8	0	py	prod	-	py/pkg/mod.py
+M	1	1	deps	config	-	py/requirements.txt
+M	2	0	ansible	prod	-	roles/web/tasks/main.yml

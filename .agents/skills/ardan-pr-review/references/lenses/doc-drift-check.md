@@ -6,10 +6,8 @@ Flag comments that contradict the code, promise behavior it lacks, omit an impor
 
 ## Language lens
 
-- **Go** — exported identifiers documented where package style requires, starting with the identifier's name; comments on converters and strong types match the layer rules.
-- **Vue/JS/TS** — JSDoc and component comments match the real `props`, `emits`, and behavior.
-- **SQL / Rego / proto / Helm** — headers and inline comments describe what the file actually does.
-- **All** — comments describe behavior, errors, side effects, ordering, invariants; examples still compile against the current API; TODOs are still true and actionable.
+- The **Clarity** section of each idiom file in your prompt (doc conventions such as Go's exported-identifier comments, Rust's `# Errors`/`# Safety`, terraform-docs tables, chart READMEs).
+- **All** — comments describe behavior, errors, side effects, ordering, invariants; examples still compile or render against the current API; TODOs are still true and actionable.
 
 ## Patrol route
 

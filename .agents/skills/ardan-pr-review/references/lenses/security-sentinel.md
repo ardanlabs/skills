@@ -10,7 +10,7 @@ Think in chains (leak → replay → escalate), including unlikely ones. A suspi
 
 ## Tools
 
-Scanner results are in `checks/summary.tsv`: secrets (`gitleaks`/`trufflehog`, or a `secrets` row saying none is installed), `gosec`, `govulncheck`, `semgrep` (only with a repo config), linters. Start there. You may run another installed tool from `tools.tsv` on in-scope files only (e.g. `osv-scanner` on a changed lockfile, `conftest` on Rego, `hadolint` on a Dockerfile). Trace taint with `gopls`/LSP; `rg` sweeps supplement, never replace. A missing tool goes to Open checks — the concern still gets a manual pass.
+Scanner results are the `lens=security-sentinel` rows of `checks/summary.tsv`: secrets (`gitleaks`/`trufflehog`, or a `secrets` row saying none is installed), language scanners and advisories (`gosec`, `govulncheck`, `cargo-audit`, `cargo-deny`, `bandit`, `pip-audit`), IaC misconfiguration (`iac-scan`: trivy or checkov over Terraform, charts, manifests, Dockerfiles), `zizmor` (GitHub Actions), `semgrep` (only with a repo config). Start there, then apply the **Security** section of each idiom file in your prompt. You may run another installed tool from `tools.tsv` on in-scope files only (e.g. `osv-scanner` on a changed lockfile, `conftest` on Rego). Trace taint with the language tool; `rg` sweeps supplement, never replace. A missing tool goes to Open checks — the concern still gets a manual pass.
 
 ## Patrol route
 
@@ -19,7 +19,7 @@ Scanner results are in `checks/summary.tsv`: secrets (`gitleaks`/`trufflehog`, o
 3. **Injection and input.** SQL/NoSQL/command/template injection, unparameterized queries, shell interpolation, path traversal, SSRF, unsafe deserialization, XXE, XSS. Trace source (request, header, file, env, DB) to sink.
 4. **AuthN/AuthZ and tenancy.** Handlers without auth, IDOR, queries without tenant/owner scope, Rego failing open, checks after side effects, skipped or weak JWT/signature verification.
 5. **Crypto and transport.** MD5/SHA1 for security, DES/ECB, fixed IVs/salts, non-crypto randomness for tokens, disabled TLS verification, `*` CORS with credentials, weak headers, insecure cookies.
-6. **Config and supply chain.** Debug modes, default creds, broad permissions/IAM/RBAC, exposed admin ports, new or unpinned dependencies (typosquats, known CVEs), CI secrets echoed, `curl | sh`.
+6. **Config, infrastructure, and supply chain.** Debug modes, default creds, broad IAM/RBAC (`*` actions, resources, or verbs), public network exposure and storage, encryption or logging turned off, privileged containers, secrets in state, values, or variables, exposed admin ports, new or unpinned dependencies, images, actions, or modules (typosquats, known CVEs), CI injection and secrets reachable from forks, `curl | sh`.
 
 ## Fan-out (from your prompt)
 

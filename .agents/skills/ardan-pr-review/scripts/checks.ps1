@@ -1,24 +1,27 @@
-# Usage: checks.ps1 RUN_DIR [-Env K=V,...] [-Exclude PATH,...] [-Timeout 15m] [-NoTests]
+# Usage: checks.ps1 RUN_DIR [-Env K=V,...] [-Exclude PATH,...] [-Timeout 15m] [-NoTests] [-Extra NAME,...|all]
 # PowerShell port of checks.sh (same outputs). Runs every mechanical check ONCE, scoped to the
-# files/packages intake recorded in RUN_DIR/context, in parallel; the depth in scope.txt picks
-# the files (see checks.sh). Output:
+# files/units intake recorded in RUN_DIR/context, in parallel; the depth in scope.txt picks
+# the files (see checks.sh, also for what is written outside the run directory). Output:
 # RUN_DIR/context/checks/<check>.txt (full log) and RUN_DIR/context/checks/summary.tsv.
 #   -Env K=V      set for every check (e.g. GITHUB_WORKSPACE=C:\repo)
-#   -Exclude PATH never run tests in packages under PATH (repo-relative)
-#   -Timeout D    go test -timeout (default 15m)
+#   -Exclude PATH never run tests in packages/crates/projects under PATH (repo-relative)
+#   -Timeout D    test timeout (default 15m)
 #   -NoTests      skip test runs
+#   -Extra NAMES  also run these user-approved rows of context/extra-checks.tsv (all = every row)
 # A failing check is data for the reviewers, not a script failure. Exit: 0 ran | 2 usage.
 param(
     [Parameter(Mandatory = $true, Position = 0)][string]$RunDir,
     [string[]]$Env = @(),
     [string[]]$Exclude = @(),
     [string]$Timeout = '15m',
-    [switch]$NoTests
+    [switch]$NoTests,
+    [string[]]$Extra = @()
 )
 
 # -File passes 'a,b' as one string: split list parameters ourselves (-Env only before NAME=).
 $Env = @($Env | ForEach-Object { $_ -split ',(?=[A-Za-z_][A-Za-z0-9_]*=)' } | Where-Object { $_ })
 $Exclude = @($Exclude | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+$Extra = @($Extra | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 $utf8 = [Text.UTF8Encoding]::new($false)
@@ -98,7 +101,24 @@ function Skip([string]$name, [string]$why) {
 }
 
 $files = @(ReadTsv $scoped)
-function Live([string]$lang) { @($files | Where-Object { $_[0] -ne 'D' -and ($lang -eq '*' -or $_[3] -ceq $lang) } | ForEach-Object { $_[6] }) }
+# Generated files reviewed on request (-IncludeGenerated) are read by reviewers but not linted.
+function Live([string]$lang) { @($files | Where-Object { $_[0] -ne 'D' -and $_[4] -ne 'generated' -and $_[4] -ne 'vendor' -and ($lang -eq '*' -or $_[3] -ceq $lang) } | ForEach-Object { $_[6] }) }
+function DirOf([string]$p) { if ($p -cmatch '/') { $p -creplace '/[^/]*$', '' } else { '.' } }
+# Units ECO: unit directories of an ecosystem from stack.tsv ("-" rows are file-level)
+$stack = @(ReadTsv (Join-Path $ctx 'stack.tsv'))
+function Units([string]$eco) { @($stack | Where-Object { $_[0] -ceq $eco -and $_[1] -ne '-' } | ForEach-Object { $_[1] }) }
+# USfx ECO UNIT: log-name suffix, "@unit" when the ecosystem has more than one unit
+function USfx([string]$eco, [string]$u) { if (@(Units $eco).Count -gt 1) { '@' + ($u -creplace '/', '_') } else { '' } }
+function IsExcl([string]$p) { foreach ($e in $Exclude) { if ($p -ceq $e -or $p.StartsWith("$e/", [StringComparison]::Ordinal)) { return $true } }; $false }
+# Under UNIT LANG: live files of LANG inside UNIT, relative to UNIT
+function Under([string]$u, [string]$lang) { @(Live $lang | ForEach-Object { if ($u -eq '.') { $_ } elseif ($_.StartsWith("$u/", [StringComparison]::Ordinal)) { $_.Substring($u.Length + 1) } }) }
+$onWin = [Environment]::OSVersion.Platform -eq 'Win32NT'
+# timeout/gtimeout (coreutils) bound test runs; Windows' timeout.exe is something else.
+$tmo = if ($onWin) { $null } else { Get-Command timeout, gtimeout -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 }
+function JobT([string]$name, [string]$dir, [string]$exe, [string[]]$a) {
+    if ($tmo) { Job $name $dir $tmo.Source (@($Timeout, $exe) + $a) } else { Job $name $dir $exe $a }
+}
+function UnitDir([string]$u) { (Resolve-Path -LiteralPath $u).Path }
 
 # --- base tree (apidiff, buf breaking) ---------------------------------------------------
 # The base commit's files, extracted outside the repo with git archive: nothing is written
@@ -168,7 +188,8 @@ foreach ($m in $modules) {
             foreach ($e in $Exclude) { if ($full -ceq $e -or $full.StartsWith("$e/", [StringComparison]::Ordinal)) { $ex = $true } }
             if (-not $ex) { $p }
         })
-    Job "go-build$sfx" $dir 'go' (@('build') + $pkgs)
+    # -o NUL / /dev/null: a single main package would otherwise write its binary into the repo
+    Job "go-build$sfx" $dir 'go' (@('build', '-o', $(if ([Environment]::OSVersion.Platform -eq 'Win32NT') { 'NUL' } else { '/dev/null' })) + $pkgs)
     Job "go-vet$sfx" $dir 'go' (@('vet') + $pkgs)
     if (-not $tests) { Skip "go-test$sfx" '--no-tests' }
     elseif (-not $testPkgs.Count) { Skip "go-test$sfx" 'all packages excluded' }
@@ -222,6 +243,226 @@ if ($sh.Count) {
 $jsDirs = @(@(Live 'js') + @(Live 'ts') + @(Live 'vue') | ForEach-Object { $_ -creplace '/[^/]*$', '' } | Select-Object -Unique)
 if ($jsDirs.Count -and (Has 'jscpd')) { Job 'jscpd' $root 'jscpd' (@('--min-tokens', '50', '--reporters', 'console', '--silent') + $jsDirs) }
 
+# --- Rust, per crate -------------------------------------------------------------------
+$rustUnits = @(Units 'rust')
+if ($rustUnits.Count) {
+    if (-not (Has 'cargo')) { Skip 'cargo' 'cargo not installed' }
+    else {
+        & cargo fmt --version *> $null; $hasFmt = $LASTEXITCODE -eq 0
+        & cargo clippy --version *> $null; $hasClippy = $LASTEXITCODE -eq 0
+        foreach ($u in $rustUnits) {
+            $s = USfx 'rust' $u; $dir = UnitDir $u
+            if ($hasFmt) { Job "cargo-fmt$s" $dir 'cargo' @('fmt', '--check') } else { Skip "cargo-fmt$s" 'rustfmt not installed' }
+            # --locked: fail instead of rewriting Cargo.lock
+            if ($hasClippy) { Job "cargo-clippy$s" $dir 'cargo' @('clippy', '--all-targets', '--locked', '--', '-D', 'warnings') }
+            else { Skip "cargo-clippy$s" 'clippy not installed'; Job "cargo-check$s" $dir 'cargo' @('check', '--all-targets', '--locked') }
+            if (-not $tests) { Skip "cargo-test$s" '--no-tests' }
+            elseif (IsExcl $u) { Skip "cargo-test$s" 'crate excluded' }
+            else { JobT "cargo-test$s" $dir 'cargo' @('test', '--all-targets', '--locked') }
+        }
+        $lockDirs = [string[]]@(@(foreach ($u in $rustUnits) {
+                    $d = $u
+                    while (-not (Test-Path -LiteralPath "$d/Cargo.lock") -and $d -ne '.') { $d = DirOf $d }
+                    if (Test-Path -LiteralPath "$d/Cargo.lock") { $d }
+                }) | Select-Object -Unique)
+        foreach ($d in $lockDirs) {
+            $s = if ($lockDirs.Count -gt 1) { '@' + ($d -creplace '/', '_') } else { '' }; $dir = UnitDir $d
+            if (Has 'cargo-audit') { Job "cargo-audit$s" $dir 'cargo' @('audit') } else { Skip "cargo-audit$s" 'cargo-audit not installed' }
+            if (Test-Path -LiteralPath "$d/deny.toml") {
+                if (Has 'cargo-deny') { Job "cargo-deny$s" $dir 'cargo' @('deny', 'check') } else { Skip "cargo-deny$s" 'cargo-deny not installed' }
+            }
+        }
+    }
+}
+
+# --- Terraform / OpenTofu, per module --------------------------------------------------
+# The stack marker names the binary (terraform or tofu). init downloads providers and modules
+# into a temp TF_DATA_DIR; an existing .terraform.lock.hcl is never rewritten
+# (-lockfile=readonly), and one that init creates is removed again.
+$tfRow = $stack | Where-Object { $_[0] -ceq 'terraform' } | Select-Object -First 1
+$tfBin = if ($tfRow) { $tfRow[3] } else { '' }
+$tfFmtFn = {
+    param($st, [string]$bin, [string[]]$fs)
+    foreach ($f in $fs) { & $bin fmt -check -diff -no-color $f 2>&1 | ForEach-Object { "$_" }; if ($LASTEXITCODE -ne 0) { $st.rc = $LASTEXITCODE } }
+}
+$tfValidateFn = {
+    param($st, [string]$bin)
+    $d = Join-Path ([IO.Path]::GetTempPath()) ('tf-data-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $d | Out-Null
+    $env:TF_DATA_DIR = $d
+    $hadLock = Test-Path -LiteralPath '.terraform.lock.hcl'
+    $lock = @(if ($hadLock) { '-lockfile=readonly' })
+    $init = @(& $bin init -backend=false -input=false @lock -no-color 2>&1 | ForEach-Object { "$_" })
+    $initRc = $LASTEXITCODE
+    if ($initRc -ne 0) { $st.rc = $initRc; '# init failed (providers, modules, or credentials):'; $init }
+    else { & $bin validate -no-color 2>&1 | ForEach-Object { "$_" }; $st.rc = $LASTEXITCODE }
+    # validate needs the lock file init wrote; remove it only afterwards
+    if (-not $hadLock) { Remove-Item -LiteralPath '.terraform.lock.hcl' -Force -ErrorAction SilentlyContinue }
+    Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
+}
+$tfLintFn = {
+    param($st, [string]$root)
+    $cfg = ''
+    if (Test-Path -LiteralPath '.tflint.hcl') { $cfg = (Resolve-Path -LiteralPath '.tflint.hcl').Path }
+    elseif (Test-Path -LiteralPath (Join-Path $root '.tflint.hcl')) { $cfg = Join-Path $root '.tflint.hcl' }
+    if ($cfg) { & tflint --init "--config=$cfg" *> $null; & tflint "--config=$cfg" --format=compact --no-color 2>&1 | ForEach-Object { "$_" } }
+    else { & tflint --format=compact --no-color 2>&1 | ForEach-Object { "$_" } }
+    $st.rc = $LASTEXITCODE
+}
+$tfFiles = @(Live 'tf' | Where-Object { $_ -cmatch '\.(tf|tofu|tfvars|tftest\.hcl)$' })
+if ($tfFiles.Count) {
+    if (-not $tfBin -or -not (Has $tfBin)) { Skip 'tf' "$tfBin not installed" }
+    else {
+        JobFn 'tf-fmt' $root "tf_fmt $($tfFiles -join ' ')" $tfFmtFn @($tfBin, [string[]]$tfFiles)
+        foreach ($u in @(Units 'terraform')) { JobFn "tf-validate$(USfx 'terraform' $u)" (UnitDir $u) 'tf_validate' $tfValidateFn @($tfBin) }
+    }
+    foreach ($u in @(Units 'terraform')) {
+        $s = USfx 'terraform' $u
+        if (Has 'tflint') { JobFn "tflint$s" (UnitDir $u) 'tf_lint' $tfLintFn @($root) } else { Skip "tflint$s" 'tflint not installed' }
+    }
+}
+
+# --- Helm, Kustomize, K8s manifests -----------------------------------------------------
+# Render (helm template / kustomize build), then kubeconform + kube-linter on the output (in a
+# .yaml file: kubeconform skips files without a YAML extension).
+$kubeFn = {
+    param($st, [string]$kind, [string]$target, [bool]$kc, [bool]$kl, [bool]$kust, [string[]]$fs)
+    if ($kind) {
+        $o = @(switch ($kind) {
+                'helm' { & helm template review $target 2>&1 }
+                'kustomize' { if ($kust) { & kustomize build $target 2>&1 } else { & kubectl kustomize $target 2>&1 } }
+            })
+        $rc = $LASTEXITCODE
+        $o | Where-Object { $_ -is [Management.Automation.ErrorRecord] } | ForEach-Object { "$_" }
+        if ($rc -ne 0) { $st.rc = $rc; return }
+        $tdir = Join-Path ([IO.Path]::GetTempPath()) ('render-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tdir | Out-Null
+        $f = Join-Path $tdir 'render.yaml'
+        [IO.File]::WriteAllText($f, ((@($o | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] }) | ForEach-Object { "$_" }) -join "`n") + "`n")
+        $fs = @($f)
+    }
+    if ($kc) { '## kubeconform'; & kubeconform -strict -ignore-missing-schemas -summary @fs 2>&1 | ForEach-Object { "$_" }; if ($LASTEXITCODE -ne 0) { $st.rc = $LASTEXITCODE } }
+    if ($kl) { '## kube-linter'; & kube-linter lint @fs 2>&1 | ForEach-Object { "$_" }; if ($LASTEXITCODE -ne 0) { $st.rc = $LASTEXITCODE } }
+    if ($kind) { Remove-Item -LiteralPath $tdir -Recurse -Force -ErrorAction SilentlyContinue }
+}
+$kc = Has 'kubeconform'; $kl = Has 'kube-linter'; $kust = Has 'kustomize'
+foreach ($u in @(Units 'helm')) {
+    $s = USfx 'helm' $u
+    if (Has 'helm') {
+        Job "helm-lint$s" $root 'helm' @('lint', $u)
+        JobFn "helm-render$s" $root "render helm $u" $kubeFn @('helm', $u, $kc, $kl, $kust, [string[]]@())
+    } else { Skip "helm$s" 'helm not installed' }
+}
+foreach ($u in @(Units 'kustomize')) {
+    $s = USfx 'kustomize' $u
+    if ($kust -or (Has 'kubectl')) { JobFn "kustomize$s" $root "render kustomize $u" $kubeFn @('kustomize', $u, $kc, $kl, $kust, [string[]]@()) }
+    else { Skip "kustomize$s" 'kustomize/kubectl not installed' }
+}
+$kuRoots = @(Units 'kustomize')
+$k8sPlain = @(Live 'k8s' | Where-Object { $p = $_; -not ($kuRoots | Where-Object { $_ -eq '.' -or $p.StartsWith("$_/", [StringComparison]::Ordinal) }) })
+if ($k8sPlain.Count) {
+    if ($kc -or $kl) { JobFn 'k8s-manifests' $root 'kube_check' $kubeFn @('', '', $kc, $kl, $kust, [string[]]$k8sPlain) }
+    else { Skip 'k8s-manifests' 'kubeconform/kube-linter not installed' }
+}
+
+# IaC misconfiguration scan: trivy, else checkov, over each infra unit directory plus the
+# K8s and Docker files outside those units (a file target scans only that file).
+$iacUnits = @(@(Units 'terraform') + @(Units 'helm') + @(Units 'kustomize') | Select-Object -Unique)
+$iacFiles = @(@(Live 'k8s') + @(Live 'docker') | Where-Object { $p = $_; -not ($iacUnits | Where-Object { $_ -eq '.' -or $p.StartsWith("$_/", [StringComparison]::Ordinal) }) })
+$iacDirs = [string[]]@(@($iacUnits) + @($iacFiles) | Where-Object { $_ } | Select-Object -Unique)
+[Array]::Sort($iacDirs, [StringComparer]::Ordinal)
+$iacFn = {
+    param($st, [bool]$trivy, [string[]]$targets)
+    foreach ($x in $targets) {
+        "## $x"
+        if ($trivy) { & trivy config --quiet --exit-code 1 $x 2>&1 | ForEach-Object { "$_" } }
+        elseif (Test-Path -LiteralPath $x -PathType Container) { & checkov --quiet --compact -d $x 2>&1 | ForEach-Object { "$_" } }
+        else { & checkov --quiet --compact -f $x 2>&1 | ForEach-Object { "$_" } }
+        if ($LASTEXITCODE -ne 0) { $st.rc = $LASTEXITCODE }
+    }
+}
+if ($iacDirs.Count) {
+    if ((Has 'trivy') -or (Has 'checkov')) { JobFn 'iac-scan' $root "iac_scan $($iacDirs -join ' ')" $iacFn @((Has 'trivy'), $iacDirs) }
+    else { Skip 'iac-scan' 'trivy/checkov not installed' }
+}
+
+# --- Python, per project ----------------------------------------------------------------
+# No caches or bytecode in the repo: ruff --no-cache, mypy without a cache dir, pytest without
+# its cache provider, PYTHONDONTWRITEBYTECODE.
+$pyFiles = @(Live 'py')
+if ($pyFiles.Count) {
+    $env:PYTHONDONTWRITEBYTECODE = '1'
+    if (Has 'ruff') {
+        Job 'ruff' $root 'ruff' (@('check', '--no-cache', '--no-fix', '--output-format=concise') + $pyFiles)
+        Job 'ruff-format' $root 'ruff' (@('format', '--no-cache', '--check', '--diff') + $pyFiles)
+    } else { Skip 'ruff' 'ruff not installed' }
+    if (Has 'bandit') { Job 'bandit' $root 'bandit' (@('-q') + $pyFiles) } else { Skip 'bandit' 'bandit not installed' }
+    $nullDir = if ($onWin) { 'nul' } else { '/dev/null' }
+    foreach ($u in @(Units 'python')) {
+        $s = USfx 'python' $u; $dir = UnitDir $u
+        $py = if ($onWin) { Join-Path $dir '.venv\Scripts\python.exe' } else { Join-Path $dir '.venv/bin/python' }
+        if (-not (Test-Path -LiteralPath $py)) { $py = if ($onWin) { 'python' } else { 'python3' } }
+        $pyproject = Join-Path $dir 'pyproject.toml'; $setupCfg = Join-Path $dir 'setup.cfg'
+        $mypyCfg = (Test-Path -LiteralPath (Join-Path $dir 'mypy.ini')) -or (Test-Path -LiteralPath (Join-Path $dir '.mypy.ini')) -or
+            ((Test-Path -LiteralPath $pyproject) -and ([IO.File]::ReadAllLines($pyproject) -cmatch '^\[tool\.mypy')) -or
+            ((Test-Path -LiteralPath $setupCfg) -and ([IO.File]::ReadAllLines($setupCfg) -cmatch '^\[mypy'))
+        if ($mypyCfg) {
+            if (Has 'mypy') { Job "mypy$s" $dir 'mypy' (@("--cache-dir=$nullDir") + (Under $u 'py')) } else { Skip "mypy$s" 'mypy not installed' }
+        }
+        Push-Location -LiteralPath $dir
+        $hasTests = [bool](@(& git -c core.quotePath=false ls-files -- . 2>$null) -cmatch '(^|/)(test_[^/]*|[^/]*_test)\.py$')
+        Pop-Location
+        if ($hasTests) {
+            if (-not $tests) { Skip "pytest$s" '--no-tests' }
+            elseif (IsExcl $u) { Skip "pytest$s" 'project excluded' }
+            else {
+                # the project's venv, else a pytest importable by python, else a standalone pytest (pipx)
+                & $py -m pytest --version *> $null
+                $pyRun = @(if ($LASTEXITCODE -eq 0) { $py, '-m', 'pytest' } elseif (Has 'pytest') { 'pytest' })
+                if ($pyRun.Count) {
+                    $ign = @(foreach ($e in $Exclude) { if ($e.StartsWith("$u/", [StringComparison]::Ordinal)) { "--ignore=$($e.Substring($u.Length + 1))" } })
+                    JobT "pytest$s" $dir $pyRun[0] (@($pyRun | Select-Object -Skip 1) + @('-q', '-p', 'no:cacheprovider') + $ign)
+                } else { Skip "pytest$s" 'pytest not installed' }
+            }
+        }
+        foreach ($r in @(Get-ChildItem -LiteralPath $dir -File -Filter 'requirements*.txt' | ForEach-Object { $_.Name } | Sort-Object)) {
+            if (Has 'pip-audit') { Job "pip-audit$s@$($r -creplace '\.txt$', '')" $dir 'pip-audit' @('-r', $r) } else { Skip "pip-audit$s" 'pip-audit not installed' }
+        }
+    }
+}
+
+# --- Ansible, YAML, Dockerfiles, CI -----------------------------------------------------
+$ans = @(Live 'ansible')
+if ($ans.Count) {
+    if (Has 'ansible-lint') { Job 'ansible-lint' $root 'ansible-lint' (@('--offline', '-q') + $ans) } else { Skip 'ansible-lint' 'ansible-lint not installed' }
+}
+if (@('.yamllint', '.yamllint.yaml', '.yamllint.yml') | Where-Object { Test-Path -LiteralPath $_ }) {
+    $yf = @(@(Live 'yaml') + @(Live 'ansible') + @(Live 'k8s') + @(Live 'ci') | Where-Object { $_ -cmatch '\.ya?ml$' })
+    if ($yf.Count) { if (Has 'yamllint') { Job 'yamllint' $root 'yamllint' (@('-f', 'parsable') + $yf) } else { Skip 'yamllint' 'yamllint not installed' } }
+}
+$dockerfiles = @(Live 'docker' | Where-Object { ($_ -creplace '.*/', '').ToLowerInvariant() -cnotmatch 'compose' })
+if ($dockerfiles.Count) { if (Has 'hadolint') { Job 'hadolint' $root 'hadolint' $dockerfiles } else { Skip 'hadolint' 'hadolint not installed' } }
+$gha = @(Live 'ci' | Where-Object { $_ -cmatch '(^|/)\.github/|(^|/)action\.ya?ml$' })
+if ($gha.Count) {
+    $wf = @($gha | Where-Object { $_ -cmatch '\.github/workflows/' })
+    if ($wf.Count) { if (Has 'actionlint') { Job 'actionlint' $root 'actionlint' (@('-no-color') + $wf) } else { Skip 'actionlint' 'actionlint not installed' } }
+    if (Has 'zizmor') { Job 'zizmor' $root 'zizmor' (@('--offline') + $gha) } else { Skip 'zizmor' 'zizmor not installed' }
+}
+
+# --- extra checks the user approved (context/extra-checks.tsv: name dir lens command source) ---
+# Each command runs in this PowerShell (sh on the shell port).
+$extraRows = @(ReadTsv (Join-Path $ctx 'extra-checks.tsv'))
+if ($Extra.Count -and $extraRows.Count) {
+    $psExe = (Get-Process -Id $PID).Path
+    foreach ($x in $extraRows) {
+        if (-not $x[0] -or $x[0].StartsWith('#') -or $x.Count -lt 4) { continue }
+        if ($Extra -cnotcontains $x[0] -and $Extra -cnotcontains 'all') { continue }
+        if ($x[0] -cmatch '[^A-Za-z0-9._-]') { continue }
+        $xd = if ($x[1]) { $x[1] } else { '.' }
+        Job "x-$($x[0])" (UnitDir $xd) $psExe @('-NoProfile', '-Command', $x[3])
+    }
+}
+
 # Secrets: the reviewed diff, or at full depth a copy of the review set (so generated and
 # vendored files stay out; findings show repo-relative paths). generated.patch is scanned
 # only on request, by the generated-scan agent (see references/roles/generated-scan.md).
@@ -260,7 +501,23 @@ if ($setCopy) { Remove-Item -LiteralPath $setCopy -Recurse -Force -ErrorAction S
 
 # --- summary ----------------------------------------------------------------------------
 $rows = New-Object System.Collections.Generic.List[string]
-$rows.Add("check`tstatus`texit`tlines`tfile")
+# LensOf CHECK: the lens that owns a check's failures (extra checks: their lens column)
+function LensOf([string]$n) {
+    if ($n.StartsWith('x-')) {
+        $r = $extraRows | Where-Object { $_[0] -ceq $n.Substring(2) } | Select-Object -First 1
+        if ($r -and $r.Count -gt 2 -and $r[2]) { return $r[2] }; return 'service-steward'
+    }
+    switch -Regex -CaseSensitive ($n) {
+        '^(go-test|cargo-test|pytest)' { return 'harness-map' }
+        '^errcheck' { return 'error-tripwire' }
+        '^(apidiff|buf-)' { return 'boundary-keeper' }
+        '^deadcode' { return 'straight-line-pass' }
+        '^(dupl|jscpd)' { return 'clone-hunter' }
+        '^(gosec|govulncheck|cargo-audit|cargo-deny|pip-audit)|^(gitleaks|trufflehog|secrets|semgrep|bandit|iac-scan|zizmor)$' { return 'security-sentinel' }
+    }
+    'service-steward'
+}
+$rows.Add("check`tstatus`texit`tlines`tfile`tlens")
 $names = [string[]]@(Get-ChildItem -LiteralPath $out -Filter '*.exit' | ForEach-Object { $_.Name })
 [Array]::Sort($names, [StringComparer]::Ordinal)
 foreach ($nm in $names) {
@@ -270,7 +527,7 @@ foreach ($nm in $names) {
     $lines = 0; foreach ($x in [IO.File]::ReadLines($log)) { $lines++ }
     # These exit 0 and report through output: any line not starting with "#" is a hit.
     if ($n -cmatch '^(dupl|gofmt$|deadcode|apidiff)' -and $s -eq 'pass' -and @([IO.File]::ReadLines($log) | Where-Object { $_ -cmatch '^[^#]' }).Count) { $s = 'findings' }
-    $rows.Add("$n`t$s`t$e`t$lines`tchecks/$n.txt")
+    $rows.Add("$n`t$s`t$e`t$lines`tchecks/$n.txt`t$(LensOf $n)")
     Remove-Item -LiteralPath $f
 }
 Out-Text (Join-Path $out 'summary.tsv') (($rows -join "`n") + "`n")
