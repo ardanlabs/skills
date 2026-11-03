@@ -110,7 +110,7 @@ case $scope in
     ;;
   range)
     a=${range%%..*} b=${range##*..}
-    [ -n "$a" ] && [ -n "$b" ] && [ "$a" != "$range" ] || die 2 "--range must be A..B"
+    if [ -z "$a" ] || [ -z "$b" ] || [ "$a" = "$range" ]; then die 2 "--range must be A..B"; fi
     bsha=$(git rev-parse --verify -q "$b^{commit}") || die 2 "unknown ref: $b"
     [ "$bsha" = "$head" ] || die 3 "range end $b is not HEAD; check out $b so checks run on the reviewed code"
     basesha=$(git rev-parse --verify -q "$a^{commit}") || die 2 "unknown ref: $a"
@@ -154,7 +154,7 @@ esac
 # --- issue id ---------------------------------------------------------------------
 [ -n "$id" ] || id=$(git symbolic-ref --short -q HEAD) || die 2 "detached HEAD: pass --id"
 slug=$(printf '%s' "$id" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9._-]/-/g' -e 's/--*/-/g' -e 's/^[-.]*//' -e 's/-*$//')
-[ -n "$slug" ] && [ "$slug" != . ] && [ "$slug" != .. ] || die 2 "issue id '$id' slugifies to nothing"
+if [ -z "$slug" ] || [ "$slug" = . ] || [ "$slug" = .. ]; then die 2 "issue id '$id' slugifies to nothing"; fi
 
 last=0
 for d in "$reviews/$slug"/*/; do
@@ -893,7 +893,7 @@ awk -F '\t' '$1 != "D" && $4 !~ /^(go|rust|vue|ts|js|css|py|tf|helm|k8s|ansible|
   echo "languages=${langs% }"
   echo "ecosystems=${ecos% }"
   echo "idioms=$idioms"
-  echo "generated=$([ "$incgen" = 1 ] && echo included || echo skipped)"
+  if [ "$incgen" = 1 ]; then echo generated=included; else echo generated=skipped; fi
   echo "trust=$trust"
   echo "trust_reason=$trust_reason"
   echo "go_packages=$(wc -l <"$ctx/packages.tsv" | tr -d ' ')"
