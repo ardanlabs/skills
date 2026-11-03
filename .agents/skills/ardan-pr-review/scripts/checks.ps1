@@ -1,7 +1,8 @@
 # Usage: checks.ps1 RUN_DIR [-Env K=V,...] [-Exclude PATH,...] [-Timeout 15m] [-NoTests] [-Extra NAME,...|all]
 # PowerShell port of checks.sh (same outputs). Runs every mechanical check ONCE, scoped to the
 # files/units intake recorded in RUN_DIR/context, in parallel; the depth in scope.txt picks
-# the files (see checks.sh, also for what is written outside the run directory). Output:
+# the files (see checks.sh, also for what is written outside the run directory, and for the
+# checks that run the reviewed code only when scope.txt says trust=maintainer). Output:
 # RUN_DIR/context/checks/<check>.txt (full log) and RUN_DIR/context/checks/summary.tsv.
 #   -Env K=V      set for every check (e.g. GITHUB_WORKSPACE=C:\repo)
 #   -Exclude PATH never run tests in packages/crates/projects under PATH (repo-relative)
@@ -38,6 +39,11 @@ $baseLine = $scopeLines | Where-Object { $_.StartsWith('base=') } | Select-Objec
 $baseSha = if ($baseLine) { $baseLine.Substring(5) } else { '' }
 $depthLine = $scopeLines | Where-Object { $_.StartsWith('depth=') } | Select-Object -First 1
 $depth = if ($depthLine) { $depthLine.Substring(6) } else { 'diff' }
+$trustLine = $scopeLines | Where-Object { $_.StartsWith('trust=') } | Select-Object -First 1
+$trust = if ($trustLine) { $trustLine.Substring(6) } else { 'untrusted' }
+# RunsCode: checks may execute the reviewed code (maintainer PR only)
+$runsCode = $trust -ceq 'maintainer'
+$untrusted = "runs the reviewed code: only for a maintainer PR (trust=$trust)"
 # scoped: the files under review — the changed files, or the review set at full depth
 $scoped = Join-Path $ctx $(if ($depth -eq 'diff') { 'files.tsv' } else { 'review-set.tsv' })
 if (-not (Test-Path -LiteralPath $root -PathType Container)) { Die "cannot enter repo root $root" }
@@ -51,7 +57,7 @@ $envKeys = foreach ($kv in $Env) {
 }
 $Exclude = @($Exclude | Where-Object { $_ } | ForEach-Object { $_.TrimEnd('/') })
 $tests = -not $NoTests
-Out-Text (Join-Path $out 'setup.txt') ("env_keys=$(@($envKeys) -join ' ')`ntest_excludes=$(($Exclude | ForEach-Object { "$_ " }) -join '')`ntest_timeout=$Timeout`ntests=$([int]$tests)`n")
+Out-Text (Join-Path $out 'setup.txt') ("env_keys=$(@($envKeys) -join ' ')`ntest_excludes=$(($Exclude | ForEach-Object { "$_ " }) -join '')`ntest_timeout=$Timeout`ntests=$([int]$tests)`ntrust=$trust`n")
 
 $tools = @{}; foreach ($r in @(ReadTsv (Join-Path $ctx 'tools.tsv'))) { $tools[$r[0]] = $r[1] }
 function Has([string]$t) { $tools.ContainsKey($t) }
@@ -191,12 +197,16 @@ foreach ($m in $modules) {
     # -o NUL / /dev/null: a single main package would otherwise write its binary into the repo
     Job "go-build$sfx" $dir 'go' (@('build', '-o', $(if ([Environment]::OSVersion.Platform -eq 'Win32NT') { 'NUL' } else { '/dev/null' })) + $pkgs)
     Job "go-vet$sfx" $dir 'go' (@('vet') + $pkgs)
-    if (-not $tests) { Skip "go-test$sfx" '--no-tests' }
+    if (-not $runsCode) { Skip "go-test$sfx" $untrusted }
+    elseif (-not $tests) { Skip "go-test$sfx" '--no-tests' }
     elseif (-not $testPkgs.Count) { Skip "go-test$sfx" 'all packages excluded' }
     else { Job "go-test$sfx" $dir 'go' (@('test', '-race', '-count=1', '-timeout', $Timeout) + $testPkgs) }
     $golangciCfg = @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -cmatch '^\.golangci\.(ya?ml|toml|json)$' })
     if ($golangciCfg.Count) {
-        if (Has 'golangci-lint') { Job "golangci-lint$sfx" $dir 'golangci-lint' (@('run') + $pkgs) }
+        # custom linters load plugin code named in the repo's config
+        $customLinters = [bool](@($golangciCfg | ForEach-Object { [IO.File]::ReadAllLines($_.FullName) }) -cmatch '^\s*custom\s*[:=]')
+        if (-not $runsCode -and $customLinters) { Skip "golangci-lint$sfx" "$untrusted (custom linter plugins)" }
+        elseif (Has 'golangci-lint') { Job "golangci-lint$sfx" $dir 'golangci-lint' (@('run') + $pkgs) }
         else { Skip "golangci-lint$sfx" 'golangci-lint not installed' }
     }
     if (Has 'staticcheck') { Job "staticcheck$sfx" $dir 'staticcheck' $pkgs } else { Skip "staticcheck$sfx" 'staticcheck not installed' }
@@ -254,9 +264,12 @@ if ($rustUnits.Count) {
             $s = USfx 'rust' $u; $dir = UnitDir $u
             if ($hasFmt) { Job "cargo-fmt$s" $dir 'cargo' @('fmt', '--check') } else { Skip "cargo-fmt$s" 'rustfmt not installed' }
             # --locked: fail instead of rewriting Cargo.lock
-            if ($hasClippy) { Job "cargo-clippy$s" $dir 'cargo' @('clippy', '--all-targets', '--locked', '--', '-D', 'warnings') }
+            # clippy/check/test compile the crate: build scripts and proc macros run
+            if (-not $runsCode) { Skip "cargo-clippy$s" "$untrusted (build scripts, proc macros)" }
+            elseif ($hasClippy) { Job "cargo-clippy$s" $dir 'cargo' @('clippy', '--all-targets', '--locked', '--', '-D', 'warnings') }
             else { Skip "cargo-clippy$s" 'clippy not installed'; Job "cargo-check$s" $dir 'cargo' @('check', '--all-targets', '--locked') }
-            if (-not $tests) { Skip "cargo-test$s" '--no-tests' }
+            if (-not $runsCode) { Skip "cargo-test$s" $untrusted }
+            elseif (-not $tests) { Skip "cargo-test$s" '--no-tests' }
             elseif (IsExcl $u) { Skip "cargo-test$s" 'crate excluded' }
             else { JobT "cargo-test$s" $dir 'cargo' @('test', '--all-targets', '--locked') }
         }
@@ -300,9 +313,16 @@ $tfValidateFn = {
     if (-not $hadLock) { Remove-Item -LiteralPath '.terraform.lock.hcl' -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
 }
+# The repo's .tflint.hcl (and its plugins) only for a maintainer PR; otherwise a neutral config
+# with the bundled rules and no plugin installation.
 $tfLintFn = {
-    param($st, [string]$root)
+    param($st, [string]$root, [bool]$trusted)
     $cfg = ''
+    if (-not $trusted) {
+        $cfg = [IO.Path]::GetTempFileName(); [IO.File]::WriteAllText($cfg, "config {`n}`n")
+        & tflint "--config=$cfg" --format=compact --no-color 2>&1 | ForEach-Object { "$_" }
+        $st.rc = $LASTEXITCODE; Remove-Item -LiteralPath $cfg -Force -ErrorAction SilentlyContinue; return
+    }
     if (Test-Path -LiteralPath '.tflint.hcl') { $cfg = (Resolve-Path -LiteralPath '.tflint.hcl').Path }
     elseif (Test-Path -LiteralPath (Join-Path $root '.tflint.hcl')) { $cfg = Join-Path $root '.tflint.hcl' }
     if ($cfg) { & tflint --init "--config=$cfg" *> $null; & tflint "--config=$cfg" --format=compact --no-color 2>&1 | ForEach-Object { "$_" } }
@@ -314,11 +334,15 @@ if ($tfFiles.Count) {
     if (-not $tfBin -or -not (Has $tfBin)) { Skip 'tf' "$tfBin not installed" }
     else {
         JobFn 'tf-fmt' $root "tf_fmt $($tfFiles -join ' ')" $tfFmtFn @($tfBin, [string[]]$tfFiles)
-        foreach ($u in @(Units 'terraform')) { JobFn "tf-validate$(USfx 'terraform' $u)" (UnitDir $u) 'tf_validate' $tfValidateFn @($tfBin) }
+        # init installs the providers and modules the change names, and validate runs them
+        foreach ($u in @(Units 'terraform')) {
+            if ($runsCode) { JobFn "tf-validate$(USfx 'terraform' $u)" (UnitDir $u) 'tf_validate' $tfValidateFn @($tfBin) }
+            else { Skip "tf-validate$(USfx 'terraform' $u)" "$untrusted (providers, modules)" }
+        }
     }
     foreach ($u in @(Units 'terraform')) {
         $s = USfx 'terraform' $u
-        if (Has 'tflint') { JobFn "tflint$s" (UnitDir $u) 'tf_lint' $tfLintFn @($root) } else { Skip "tflint$s" 'tflint not installed' }
+        if (Has 'tflint') { JobFn "tflint$s" (UnitDir $u) 'tf_lint' $tfLintFn @($root, $runsCode) } else { Skip "tflint$s" 'tflint not installed' }
     }
 }
 
@@ -407,13 +431,17 @@ if ($pyFiles.Count) {
             ((Test-Path -LiteralPath $pyproject) -and ([IO.File]::ReadAllLines($pyproject) -cmatch '^\[tool\.mypy')) -or
             ((Test-Path -LiteralPath $setupCfg) -and ([IO.File]::ReadAllLines($setupCfg) -cmatch '^\[mypy'))
         if ($mypyCfg) {
-            if (Has 'mypy') { Job "mypy$s" $dir 'mypy' (@("--cache-dir=$nullDir") + (Under $u 'py')) } else { Skip "mypy$s" 'mypy not installed' }
+            # The repo's config can load mypy plugins: only for a maintainer PR; otherwise defaults.
+            $mcfg = @()
+            if (-not $runsCode) { $mf = Join-Path $out '.mypy-neutral.ini'; Out-Text $mf "[mypy]`n"; $mcfg = @("--config-file=$mf") }
+            if (Has 'mypy') { Job "mypy$s" $dir 'mypy' (@("--cache-dir=$nullDir") + $mcfg + (Under $u 'py')) } else { Skip "mypy$s" 'mypy not installed' }
         }
         Push-Location -LiteralPath $dir
         $hasTests = [bool](@(& git -c core.quotePath=false ls-files -- . 2>$null) -cmatch '(^|/)(test_[^/]*|[^/]*_test)\.py$')
         Pop-Location
         if ($hasTests) {
-            if (-not $tests) { Skip "pytest$s" '--no-tests' }
+            if (-not $runsCode) { Skip "pytest$s" $untrusted }
+            elseif (-not $tests) { Skip "pytest$s" '--no-tests' }
             elseif (IsExcl $u) { Skip "pytest$s" 'project excluded' }
             else {
                 # the project's venv, else a pytest importable by python, else a standalone pytest (pipx)
@@ -426,7 +454,8 @@ if ($pyFiles.Count) {
             }
         }
         foreach ($r in @(Get-ChildItem -LiteralPath $dir -File -Filter 'requirements*.txt' | ForEach-Object { $_.Name } | Sort-Object)) {
-            if (Has 'pip-audit') { Job "pip-audit$s@$($r -creplace '\.txt$', '')" $dir 'pip-audit' @('-r', $r) } else { Skip "pip-audit$s" 'pip-audit not installed' }
+            # --no-deps --disable-pip: audit the pins as written; resolving could run setup.py code
+            if (Has 'pip-audit') { Job "pip-audit$s@$($r -creplace '\.txt$', '')" $dir 'pip-audit' @('--no-deps', '--disable-pip', '-r', $r) } else { Skip "pip-audit$s" 'pip-audit not installed' }
         }
     }
 }
@@ -434,7 +463,10 @@ if ($pyFiles.Count) {
 # --- Ansible, YAML, Dockerfiles, CI -----------------------------------------------------
 $ans = @(Live 'ansible')
 if ($ans.Count) {
-    if (Has 'ansible-lint') { Job 'ansible-lint' $root 'ansible-lint' (@('--offline', '-q') + $ans) } else { Skip 'ansible-lint' 'ansible-lint not installed' }
+    # ansible-lint loads the repo's plugins, modules, and custom rules
+    if (-not $runsCode) { Skip 'ansible-lint' "$untrusted (repo plugins and rules)" }
+    elseif (Has 'ansible-lint') { Job 'ansible-lint' $root 'ansible-lint' (@('--offline', '-q') + $ans) }
+    else { Skip 'ansible-lint' 'ansible-lint not installed' }
 }
 if (@('.yamllint', '.yamllint.yaml', '.yamllint.yml') | Where-Object { Test-Path -LiteralPath $_ }) {
     $yf = @(@(Live 'yaml') + @(Live 'ansible') + @(Live 'k8s') + @(Live 'ci') | Where-Object { $_ -cmatch '\.ya?ml$' })
@@ -452,7 +484,9 @@ if ($gha.Count) {
 # --- extra checks the user approved (context/extra-checks.tsv: name dir lens command source) ---
 # Each command runs in this PowerShell (sh on the shell port).
 $extraRows = @(ReadTsv (Join-Path $ctx 'extra-checks.tsv'))
-if ($Extra.Count -and $extraRows.Count) {
+# Repo gates run commands the reviewed repo defines: only for a maintainer PR.
+if ($Extra.Count -and $extraRows.Count -and -not $runsCode) { Skip 'extra-checks' "$untrusted (repo-defined commands)" }
+elseif ($Extra.Count -and $extraRows.Count) {
     $psExe = (Get-Process -Id $PID).Path
     foreach ($x in $extraRows) {
         if (-not $x[0] -or $x[0].StartsWith('#') -or $x.Count -lt 4) { continue }
@@ -496,6 +530,7 @@ $semcfg = @('.semgrep.yml', '.semgrep.yaml', '.semgrep') | Where-Object { Test-P
 if ((Has 'semgrep') -and $semcfg) { Job 'semgrep' $root 'semgrep' (@('scan', '--metrics=off', '--config', $semcfg) + @(Live '*')) }
 
 if ($jobs.Count) { $jobs | Wait-Job | Out-Null; $jobs | Receive-Job -ErrorAction SilentlyContinue | Out-Null; $jobs | Remove-Job }
+Remove-Item -LiteralPath (Join-Path $out '.mypy-neutral.ini') -Force -ErrorAction SilentlyContinue
 if ($baseSrc) { Remove-Item -LiteralPath $baseSrc -Recurse -Force -ErrorAction SilentlyContinue }
 if ($setCopy) { Remove-Item -LiteralPath $setCopy -Recurse -Force -ErrorAction SilentlyContinue }
 

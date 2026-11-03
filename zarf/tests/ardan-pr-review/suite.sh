@@ -121,6 +121,32 @@ if [ "$before" = "$after" ]; then pass "working tree unchanged by checks"
 else fail "working tree changed by checks"; printf '%s\n' "$after" | sed 's/^/      /'
 fi
 
+# --- trust: PR runs through a fake gh ----------------------------------------------------------
+# Only a PR whose author has write access and whose head branch is in the base repo may run the
+# reviewed code. The untrusted runs above (--base) already showed those checks are skipped.
+mkdir -p "$work/ghbin" && cp "$here/stub-gh.sh" "$work/ghbin/gh" && chmod +x "$work/ghbin/gh"
+FX_HEAD=$(git rev-parse HEAD) FX_BASE=$(git rev-parse main)
+export FX_HEAD FX_BASE
+path0=$PATH
+PATH=$work/ghbin:$PATH
+: >"$work/trust.view"
+for t in write:false read:false write:true; do
+  FX_GH_PERM=${t%:*} FX_GH_CROSS=${t#*:}
+  export FX_GH_PERM FX_GH_CROSS
+  intake_pair "pr-$FX_GH_PERM-$FX_GH_CROSS" "--pr 1" "-Pr 1"
+  { echo "# perm=$FX_GH_PERM cross=$FX_GH_CROSS"; grep '^trust' ".reviews/sh/pr-$FX_GH_PERM-$FX_GH_CROSS/001/context/scope.txt"; } >>"$work/trust.view"
+done
+golden trust.txt "$work/trust.view"
+cp "$work/extra.tsv" .reviews/sh/pr-write-false/001/context/extra-checks.tsv
+cp "$work/extra.tsv" .reviews/ps/pr-write-false/001/context/extra-checks.tsv
+checks_pair pr-write-false "--extra echo-x" "-Extra echo-x"
+checks_view .reviews/sh/pr-write-false/001 >"$work/trusted.view"; golden "$mode.trusted.checks.tsv" "$work/trusted.view"
+PATH=$path0
+after=$(tree_state)
+if [ "$before" = "$after" ]; then pass "working tree unchanged by maintainer-PR checks"
+else fail "working tree changed by maintainer-PR checks"; printf '%s\n' "$after" | sed 's/^/      /'
+fi
+
 # --- container: OpenTofu selection and its read-only lock -------------------------------------
 if [ "$mode" = container ]; then
   echo 1.13.0 >.opentofu-version

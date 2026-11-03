@@ -17,6 +17,7 @@ CI (`.github/workflows/ardan-pr-review.yml`) runs `lint`, host mode on Linux and
 
 - **sh ↔ PowerShell parity** — `intake.sh`/`intake.ps1` write identical context files at diff, project, and packages + `--include-generated` depth; `checks.sh`/`checks.ps1` give the same check, status, and lens; both `extract-findings` ports save the same files.
 - **Golden results** — `expected/` holds the intake outputs (files, stack, symbols, refs, signals, review sets, …) and the check statuses per mode (`host.checks.tsv`, `container.checks.tsv`, `tofu.*`).
+- **Trust** — a fake `gh` (`stub-gh.sh`) drives `--pr` runs: only an author with write access on a base-repo branch gets `trust=maintainer`; read access or a fork stays untrusted. Code-executing checks are skipped in the untrusted runs (`*.checks.tsv`) and run in the maintainer run (`*.trusted.checks.tsv`).
 - **Read-only** — checks leave `git status` unchanged (cargo's gitignored `target/` excepted), including Terraform init and the OpenTofu pass.
 
 Host mode replaces every analyzer with a stub, so it tests routing and both ports on BSD (macOS) and GNU (Linux) userlands. Container mode runs the real tools from `Dockerfile`.

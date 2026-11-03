@@ -5,7 +5,10 @@
 # RUN_DIR/context, in parallel. The depth comes from scope.txt: at diff depth file checks
 # cover the changed files; at full depth (files/packages/project) they cover review-set.tsv,
 # and unit checks (Go packages, crates, Terraform modules, charts, ...) cover packages.tsv and
-# stack.tsv, which intake fills to match the depth. Nothing writes to the working tree beyond
+# stack.tsv, which intake fills to match the depth. Checks that run the reviewed code (tests,
+# Rust builds, Terraform init/validate, tflint plugins, mypy and Ansible plugins, repo gates) run
+# only when scope.txt says trust=maintainer (a maintainer PR, see intake.sh); otherwise they are
+# skipped and the rest run against neutral configs. Nothing writes to the working tree beyond
 # build caches (Go cache, cargo target/): Terraform init uses a temp TF_DATA_DIR and a read-only
 # lock file; Python checks run without caches or bytecode.
 # Output: RUN_DIR/context/checks/<check>.txt (full log) and RUN_DIR/context/checks/summary.tsv
@@ -46,6 +49,7 @@ ctx=$(cd -- "$run/context" 2>/dev/null && pwd) || die "no context in $run (run i
 root=$(sed -n 's/^root=//p' "$ctx/scope.txt")
 basesha=$(sed -n 's/^base=//p' "$ctx/scope.txt")
 depth=$(sed -n 's/^depth=//p' "$ctx/scope.txt")
+trust=$(sed -n 's/^trust=//p' "$ctx/scope.txt")
 # scoped: the files under review — the changed files, or the review set at full depth
 scoped=$ctx/files.tsv
 [ "${depth:-diff}" = diff ] || scoped=$ctx/review-set.tsv
@@ -60,6 +64,7 @@ toolpath() { awk -F '\t' -v t="$1" '$1 == t { print $2; exit }' "$ctx/tools.tsv"
   printf 'test_excludes=%s\n' "$(printf '%s' "$excludes" | tr '\n' ' ')"
   echo "test_timeout=$timeout"
   echo "tests=$tests"
+  echo "trust=${trust:-untrusted}"
 } >"$out/setup.txt"
 
 # job NAME CMD...: run CMD in the background, log to $out/NAME.txt, exit code to NAME.exit.
@@ -72,6 +77,9 @@ job() {
   ) >"$out/$name.txt" 2>&1 &
 }
 skip() { printf '# skipped: %s\n' "$2" >"$out/$1.txt"; echo skip >"$out/$1.exit"; }
+# runs_code: true when checks may execute the reviewed code (maintainer PR only)
+runs_code() { [ "$trust" = maintainer ]; }
+UNTRUSTED="runs the reviewed code: only for a maintainer PR (trust=${trust:-untrusted})"
 
 # live LANG: reviewed (not deleted) files of LANG ("*" = any), repo-relative. Generated files
 # reviewed on request (--include-generated) are read by reviewers but not linted.
@@ -166,12 +174,15 @@ for m in $modules; do
     # -o /dev/null: a single main package would otherwise write its binary into the repo
     job "go-build$sfx" go build -o /dev/null $pkgs
     job "go-vet$sfx" go vet $pkgs
-    if [ $tests = 0 ]; then skip "go-test$sfx" "--no-tests"
+    if ! runs_code; then skip "go-test$sfx" "$UNTRUSTED"
+    elif [ $tests = 0 ]; then skip "go-test$sfx" "--no-tests"
     elif [ -z "$testpkgs" ]; then skip "go-test$sfx" "all packages excluded"
     else job "go-test$sfx" go test -race -count=1 -timeout "$timeout" $testpkgs
     fi
     if ls .golangci.y*ml .golangci.toml .golangci.json >/dev/null 2>&1; then
-      if has golangci-lint; then job "golangci-lint$sfx" golangci-lint run $pkgs
+      # custom linters load plugin code named in the repo's config
+      if ! runs_code && grep -Eqs '^[[:space:]]*custom[[:space:]]*[:=]' .golangci.*; then skip "golangci-lint$sfx" "$UNTRUSTED (custom linter plugins)"
+      elif has golangci-lint; then job "golangci-lint$sfx" golangci-lint run $pkgs
       else skip "golangci-lint$sfx" "golangci-lint not installed"
       fi
     fi
@@ -263,10 +274,13 @@ if [ -n "$(units rust)" ]; then
         else skip "cargo-fmt$s" "rustfmt not installed"
         fi
         # --locked: fail instead of rewriting Cargo.lock
-        if cargo clippy --version >/dev/null 2>&1; then job "cargo-clippy$s" cargo clippy --all-targets --locked -- -D warnings
+        # clippy/check/test compile the crate: build scripts and proc macros run
+        if ! runs_code; then skip "cargo-clippy$s" "$UNTRUSTED (build scripts, proc macros)"
+        elif cargo clippy --version >/dev/null 2>&1; then job "cargo-clippy$s" cargo clippy --all-targets --locked -- -D warnings
         else skip "cargo-clippy$s" "clippy not installed"; job "cargo-check$s" cargo check --all-targets --locked
         fi
-        if [ $tests = 0 ]; then skip "cargo-test$s" "--no-tests"
+        if ! runs_code; then skip "cargo-test$s" "$UNTRUSTED"
+        elif [ $tests = 0 ]; then skip "cargo-test$s" "--no-tests"
         elif excluded "$u"; then skip "cargo-test$s" "crate excluded"
         else job "cargo-test$s" with_timeout cargo test --all-targets --locked
         fi
@@ -312,8 +326,11 @@ tf_validate() {
   [ -n "$lock" ] || rm -f .terraform.lock.hcl
   rm -rf "$d" "$d.init"; return $rc
 }
+# tf_lint: the repo's .tflint.hcl (and its plugins) only for a maintainer PR; otherwise a
+# neutral config with the bundled rules and no plugin installation.
 tf_lint() {
   cfg=''
+  if ! runs_code; then cfg=$(mktemp) || return 1; printf 'config {\n}\n' >"$cfg"; tflint --config="$cfg" --format=compact --no-color; rc=$?; rm -f "$cfg"; return $rc; fi
   if [ -f .tflint.hcl ]; then cfg=$PWD/.tflint.hcl; elif [ -f "$root/.tflint.hcl" ]; then cfg=$root/.tflint.hcl; fi
   if [ -n "$cfg" ]; then tflint --init --config="$cfg" >/dev/null 2>&1; tflint --config="$cfg" --format=compact --no-color
   else tflint --format=compact --no-color
@@ -328,7 +345,10 @@ if [ -n "$tf_files" ]; then
     while IFS= read -r u; do
       [ -n "$u" ] || continue
       s=$(usfx terraform "$u")
-      ( cd -- "$u" || exit 1; job "tf-validate$s" tf_validate; wait ) &
+      # init installs the providers and modules the change names, and validate runs them
+      if runs_code; then ( cd -- "$u" || exit 1; job "tf-validate$s" tf_validate; wait ) &
+      else skip "tf-validate$s" "$UNTRUSTED (providers, modules)"
+      fi
     done <<EOF
 $(units terraform)
 EOF
@@ -445,11 +465,15 @@ if [ -n "$py_files" ]; then
       py=python3; [ -x .venv/bin/python ] && py=.venv/bin/python
       if [ -f mypy.ini ] || [ -f .mypy.ini ] || grep -qs '^\[tool\.mypy' pyproject.toml || grep -qs '^\[mypy' setup.cfg; then
         rel=$(under "$u" py)
+        # The repo's config can load mypy plugins: only for a maintainer PR; otherwise defaults.
+        mcfg=''
+        if ! runs_code; then mcfg=$out/.mypy-neutral.ini; printf '[mypy]\n' >"$mcfg"; fi
         # shellcheck disable=SC2086
-        if has mypy; then job "mypy$s" mypy --cache-dir=/dev/null $rel; else skip "mypy$s" "mypy not installed"; fi
+        if has mypy; then job "mypy$s" mypy --cache-dir=/dev/null ${mcfg:+--config-file="$mcfg"} $rel; else skip "mypy$s" "mypy not installed"; fi
       fi
       if git ls-files -- . | grep -Eq '(^|/)(test_[^/]*|[^/]*_test)\.py$'; then
-        if [ $tests = 0 ]; then skip "pytest$s" "--no-tests"
+        if ! runs_code; then skip "pytest$s" "$UNTRUSTED"
+        elif [ $tests = 0 ]; then skip "pytest$s" "--no-tests"
         elif excluded "$u"; then skip "pytest$s" "project excluded"
         else
           # the project's venv, else a pytest importable by python3, else a standalone pytest (pipx)
@@ -468,7 +492,8 @@ if [ -n "$py_files" ]; then
       fi
       for r in requirements*.txt; do
         [ -f "$r" ] || continue
-        if has pip-audit; then job "pip-audit$s@${r%.txt}" pip-audit -r "$r"; else skip "pip-audit$s" "pip-audit not installed"; fi
+        # --no-deps --disable-pip: audit the pins as written; resolving could run setup.py code
+        if has pip-audit; then job "pip-audit$s@${r%.txt}" pip-audit --no-deps --disable-pip -r "$r"; else skip "pip-audit$s" "pip-audit not installed"; fi
       done
       wait
     ) &
@@ -481,7 +506,11 @@ fi
 ans_files=$(live ansible)
 if [ -n "$ans_files" ]; then
   # shellcheck disable=SC2086
-  if has ansible-lint; then job ansible-lint ansible-lint --offline -q $ans_files; else skip ansible-lint "ansible-lint not installed"; fi
+  # ansible-lint loads the repo's plugins, modules, and custom rules
+  if ! runs_code; then skip ansible-lint "$UNTRUSTED (repo plugins and rules)"
+  elif has ansible-lint; then job ansible-lint ansible-lint --offline -q $ans_files
+  else skip ansible-lint "ansible-lint not installed"
+  fi
 fi
 ycfg=''
 for c in .yamllint .yamllint.yaml .yamllint.yml; do [ -e "$c" ] && ycfg=$c && break; done
@@ -509,7 +538,9 @@ if [ -n "$gha" ]; then
 fi
 
 # --- extra checks the user approved (context/extra-checks.tsv: name dir lens command source) ---
-if [ -n "$extra" ] && [ -f "$ctx/extra-checks.tsv" ]; then
+# Repo gates run commands the reviewed repo defines: only for a maintainer PR.
+if [ -n "$extra" ] && [ -f "$ctx/extra-checks.tsv" ] && ! runs_code; then skip extra-checks "$UNTRUSTED (repo-defined commands)"
+elif [ -n "$extra" ] && [ -f "$ctx/extra-checks.tsv" ]; then
   while IFS="$(printf '\t')" read -r xn xd _ xc _; do
     case $xn in ''|\#*) continue ;; esac
     case ",$extra," in *",$xn,"*|,all,) ;; *) continue ;; esac
@@ -559,6 +590,7 @@ if has semgrep && [ -n "$semcfg" ]; then
 fi
 
 wait
+rm -f "$out/.mypy-neutral.ini"
 
 # --- summary ----------------------------------------------------------------------------
 # lens_of CHECK: the lens that owns a check's failures (extra checks: their lens column)

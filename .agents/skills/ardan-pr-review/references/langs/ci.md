@@ -2,7 +2,7 @@
 
 Covers GitHub Actions, GitLab CI, Jenkins, CircleCI, Azure Pipelines, Bitbucket, Buildkite, Tekton, Drone, Travis, Cloud Build, Woodpecker — `stack.tsv` names the system in the marker column. Apply the general rules below in that system's syntax.
 
-**Tools:** `rg`. **Checks:** `actionlint` and `zizmor` for GitHub Actions; other systems have no offline linter — review by reading (repo-defined validators arrive as extra checks when approved). Never trigger a pipeline.
+**Tools:** `rg`. **Checks:** `actionlint` and `zizmor` for GitHub Actions; other systems have no offline linter — review by reading (repo-defined validators arrive as extra checks when approved, for a maintainer PR only). Never trigger a pipeline.
 
 ## Correctness
 Triggers run where intended (PRs, forks, tags, branches, path filters, `rules`/`only`/`except`, `when`); job ordering (`needs`, stages, `dependsOn`); matrix coverage; cache keys that miss inputs or poison builds; artifact names and paths between jobs; concurrency groups and cancel-in-progress; `if:` expressions (string vs boolean, `success()` vs `always()`); shell steps quoting and `set -euo pipefail`; reusable workflow / template inputs.

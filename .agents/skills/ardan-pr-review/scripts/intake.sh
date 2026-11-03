@@ -14,6 +14,9 @@
 # read with > --max-file-lines lines (2000), noise (generated/vendor/lockfiles) and PRs
 # over the shard threshold. Generated and vendored files are skipped unless --include-generated;
 # symlinks are never reviewed. --dry-run prints the summary without writing anything.
+# Trust: scope.txt trust=maintainer only for --pr when GitHub says the PR author has write,
+# maintain, or admin access and the head branch is in the base repo (not a fork); anything else
+# is trust=untrusted, and checks never run the reviewed code (tests, builds, plugins, repo gates).
 # Exit: 0 ok | 2 usage | 3 code on disk is not the code under review | 4 empty diff | 5 not a git repo.
 
 set -u
@@ -828,6 +831,31 @@ need() {  # need TOOL NEEDED_FOR INSTALL [go]: record TOOL if missing (or stale,
   fi
 } >"$ctx/missing.tsv"
 
+# --- trust: may checks run the reviewed code? ----------------------------------------
+# Only a pull request from a maintainer: its author has write/maintain/admin on the base repo
+# and its head branch lives there, so only people with write access can have pushed to it
+# (commit authors are not checked: anyone can set them). Every failure means untrusted.
+trust=untrusted trust_reason="not a pull request (--pr)"
+if [ "$scope" = pr ]; then
+  trust_reason="could not read the PR author from GitHub"
+  # shellcheck disable=SC2046 # split "login cross url"
+  set -- $(gh pr view "$pr" --json author,isCrossRepository,url --jq '.author.login + " " + (.isCrossRepository | tostring) + " " + .url' 2>/dev/null)
+  login=${1-} cross=${2-} prurl=${3-}
+  host=$(printf '%s' "$prurl" | sed -n 's|^https://\([^/]*\)/[^/]*/[^/]*/pull/.*|\1|p')
+  repo=$(printf '%s' "$prurl" | sed -n 's|^https://[^/]*/\([^/]*/[^/]*\)/pull/.*|\1|p')
+  if [ -n "$login" ] && [ -n "$repo" ]; then
+    if [ "$cross" != false ]; then trust_reason="PR head branch is in a fork"
+    else
+      perm=$(gh api --hostname "$host" "repos/$repo/collaborators/$login/permission" --jq .permission 2>/dev/null)
+      case $perm in
+        admin|maintain|write) trust=maintainer trust_reason="$login has $perm access to $repo; head branch in $repo" ;;
+        '') trust_reason="could not read $login's permission on $repo" ;;
+        *) trust_reason="$login has $perm access to $repo" ;;
+      esac
+    fi
+  fi
+fi
+
 # --- scope.txt ------------------------------------------------------------------
 langs=$(awk -F '\t' '{ c[$4]++ } END { for (l in c) printf "%s:%d ", l, c[l] }' "$ctx/files.tsv")
 ecos=$(cut -f1 "$ctx/stack.tsv" | uniq -c | awk '{ printf "%s:%d ", $2, $1 }')
@@ -864,6 +892,8 @@ awk -F '\t' '$1 != "D" && $4 !~ /^(go|rust|vue|ts|js|css|py|tf|helm|k8s|ansible|
   echo "ecosystems=${ecos% }"
   echo "idioms=$idioms"
   echo "generated=$([ "$incgen" = 1 ] && echo included || echo skipped)"
+  echo "trust=$trust"
+  echo "trust_reason=$trust_reason"
   echo "go_packages=$(wc -l <"$ctx/packages.tsv" | tr -d ' ')"
   echo "symbols=$(wc -l <"$ctx/symbols.tsv" | tr -d ' ')"
   echo "refs=$(wc -l <"$ctx/refs.tsv" | tr -d ' ')"

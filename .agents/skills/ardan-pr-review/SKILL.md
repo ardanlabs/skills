@@ -12,6 +12,7 @@ Rules for you:
 - **Start from a fresh session.** Every orchestrator turn re-reads the whole conversation; inside a long session that costs more than the agents. If the conversation already holds unrelated work, suggest `/clear` (or a new session) before starting.
 - **Keep your context small.** Read only script output, agents' replies (one line; the discovery agent's and the aggregator's also carry blocks you only save), `ac-review.md` (when ACs are weak/missing), `references/size-guard.md` (when there are size warnings), and the `F…` headings of `findings.md`. Never read the diff, brief, check logs, or agent reports.
 - **Advisory only.** Nothing here edits, stages, or commits code, and nothing deploys, applies, or plans infrastructure.
+- **Never run the reviewed code unless it's a maintainer PR.** Tests, Rust builds, Terraform init/validate, linter plugins, repo gates, and security PoCs run only when `scope.txt` says `trust=maintainer`: intake sets it for `--pr` when GitHub reports the PR author has write access and the head branch is in the base repo. Every other scope is untrusted; the read-only checks still run. Never edit `scope.txt` or work around it — to run the code, review it as a maintainer's PR.
 - **The change, not the codebase.** By default only the change is reviewed (`contract.md` → Review scope). Problems that predate it are dropped, not reported. Only an explicit full-review request widens that.
 - **Runs are independent.** Never open a previous run's files.
 
@@ -30,7 +31,7 @@ Note what was given: scope (default: unstaged + untracked; or `--staged`, `--bas
 
 If a full review was requested without an extent, ask first; the preview needs the answer: *Changed files* (default) · *Changed packages* (every file in their directories) · *Whole project*. Map the answer to `--depth files|packages|project`.
 
-`intake.sh --dry-run <scope> [--depth <depth>] [--id <ticket id>]` writes nothing. On exit `3` the reviewed code isn't checked out: relay the printed command and stop. On `4` there is nothing to review: say so and stop. On `2` fix the arguments.
+`intake.sh --dry-run <scope> [--depth <depth>] [--id <ticket id>]` writes nothing. On exit `3` the reviewed code isn't checked out: relay the printed command and stop. On `4` there is nothing to review: say so and stop. On `2` fix the arguments. Unless `trust=maintainer`, say in one line that checks which run the code (tests, builds, Terraform init, plugins, repo gates) will be skipped, with `trust_reason`.
 
 **Discovery.** Then launch the discovery agent, on a cheaper model when your runtime picks models per subagent (it reads configs only): "Follow `<skill>/references/roles/discovery.md`. Skill directory: `<skill>`. Repo root: `<root>`. Review depth: <…>. Preview: <the `languages=`, `ecosystems=`, `idioms=` lines and the `# stack` and `# unmapped` rows, verbatim>." Wait for its reply (step 3 offers its repo gates; step 4 saves it).
 
@@ -43,14 +44,14 @@ One round (native question UI if available, ≤3 batches). Skip what the request
 1. **Ticket link** — always ask if none was given. "No ticket" is valid: spec review then works best-effort from the PR description and commits.
 2. **Scope and id** — confirm the preview's scope, counts, `id` (ticket id, else branch name — same work, same directory), and depth (at full depth, `review_files` / `review_lines` too).
 3. **Size** — if `size_warnings > 0`, follow `references/size-guard.md`.
-4. **Repo gates** — if discovery proposed extra checks: list each (name, command, source) and ask which to run (*all* · *pick* · *none*; default *none*). They run the repo's own commands, so only approved ones run.
+4. **Repo gates** — only with `trust=maintainer`, if discovery proposed extra checks: list each (name, command, source) and ask which to run (*all* · *pick* · *none*; default *none*). Otherwise they stay in `stack.md` for reviewers to read and never run.
 5. **Agents** — *Routed* · *All agents* · *All agents + Security* · *Partial* (see step 6), naming the agents and checklists in each option, and saying when the small-diff merge applies. *Partial* asks a follow-up: *Risk only* or *Polish only*.
 6. **Security** — only with *All agents + Security*; then ask:
    - fan-out: *single* · *capped* (≤3 attacker sub-agents) · *full* (attacker + refuter per route);
    - report: *redacted* (default — `findings.md` says only "Security issues detected."; details only in `security-issues/`) · *named* (security issues listed in `findings.md` and `diagrams.md` like any finding).
 7. **Generated files** — if `skipped.tsv` has generated or vendored rows (`noise` rows in the size table), say how many are skipped and ask: *Skip* (default) · *Secret-scan only* (cost ≈ `noise_tokens_est`; a secret scanner in `tools.tsv` makes it much cheaper) · *Review them too* — re-run the preview with `--include-generated`, show the new counts and token estimates, and confirm before going on. Symlinks are never reviewed.
 8. **Model tier** — if your runtime picks models per subagent: run the context builder and generated-file scan on a cheaper model? Every run. Reviewers and the aggregator always use the session model.
-9. **Test setup** — if `go_packages > 0` or `ecosystems=` has `rust`, `python`, or `terraform`, and memory has no `ardan-project-interaction-guide` for this repo: test env vars (`K=V`, including registry or provider credentials Terraform init needs), units whose tests must never run, timeout, and how to run the project for security PoCs (*All agents + Security* only). Save it as project memory `ardan-project-interaction-guide` (no memory → ask every run).
+9. **Test setup** — only with `trust=maintainer`, if `go_packages > 0` or `ecosystems=` has `rust`, `python`, or `terraform`, and memory has no `ardan-project-interaction-guide` for this repo: test env vars (`K=V`, including registry or provider credentials Terraform init needs), units whose tests must never run, timeout, and how to run the project for security PoCs (*All agents + Security* only). Save it as project memory `ardan-project-interaction-guide` (no memory → ask every run).
 
 The answers are the confirmation; echo the final setup in ≤6 lines and continue. If they change the scope or depth, re-run the preview and discovery first.
 
@@ -59,7 +60,7 @@ The answers are the confirmation; echo the final setup in ≤6 lines and continu
 1. `intake.sh <scope> --id <id> [--depth <depth>] [--exclude <path>]… [--include-generated]` creates `<run>`. `checks.sh` reads the depth from `scope.txt`.
 2. Save the discovery reply without re-typing it: `sh <skill>/scripts/extract-findings.sh --discovery <its output_file> <run>` (PowerShell: `-Discovery`). With no transcript file, or on exit `3`/`4`, write the text between `===== stack.md =====` and `===== extra-checks.tsv =====` to `<run>/context/stack.md` and the rest up to `===== end =====` to `<run>/context/extra-checks.tsv`, verbatim.
 3. Save the ticket raw to `<run>/context/ticket.md` without reading it — tracker CLI first (`gh issue view <n> --comments > …`, `glab issue view`, `jira issue view`), then a tracker MCP, then web fetch.
-4. In parallel: `checks.sh <run> [--env K=V]… [--exclude <unit path>]… [--timeout D] [--extra <approved names>|all]` in the background, and the context builder: "Follow `<skill>/references/roles/context-builder.md`. Run directory: `<run>`."
+4. In parallel: `checks.sh <run> [--env K=V]… [--exclude <unit path>]… [--timeout D] [--extra <approved names>|all]` in the background (it reads `trust` from `scope.txt` itself), and the context builder: "Follow `<skill>/references/roles/context-builder.md`. Run directory: `<run>`."
 
 ## 5. Acceptance-criteria gate
 
@@ -97,7 +98,7 @@ Run directory: <run>. Shard: <k | all>. Review depth: <diff | files | packages |
 Write your report to <run>/lenses/<agent>[-<k>].md and reply with the one line the contract specifies.
 ```
 
-Append for `security`: `Fan-out: <mode>. Project interaction guide: <memory text | none>. PoCs only under <run>/security-issues/poc/<name>/.` For `spec`: `Criteria in force: <ticket | suggested BDD (context/ac-review.md) | best-effort>.`
+Append for `security`: `Fan-out: <mode>. Trust: <scope.txt trust>. Project interaction guide: <memory text, only with trust=maintainer | none>. PoCs only under <run>/security-issues/poc/<name>/.` For `spec`: `Criteria in force: <ticket | suggested BDD (context/ac-review.md) | best-effort>.`
 
 If the generated-file scan was accepted, also launch: "Follow `<skill>/references/roles/generated-scan.md`. Run directory: `<run>`. Skill directory: `<skill>`." No other agent reads generated files.
 

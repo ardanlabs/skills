@@ -1,6 +1,6 @@
 # Ansible idioms
 
-**Tools:** `rg`; `ansible-doc <module>` if installed. **Checks:** `ansible-lint` (offline), `yamllint` (with the repo's config). Never run playbooks against hosts; `--syntax-check` or `--check` only with the project interaction guide.
+**Tools:** `rg`; `ansible-doc <module>` if installed. **Checks:** `yamllint` (with the repo's config); `ansible-lint` (offline) for a maintainer PR only — it loads the repo's plugins and custom rules. Never run playbooks against hosts; `--syntax-check` or `--check` only for a maintainer PR and as the project interaction guide allows.
 
 ## Correctness
 Idempotency: `command`/`shell` without `creates`/`removes`/`changed_when`; FQCN module names; `become` scope; handler names that `notify` no longer matches; variable precedence surprises (role defaults vs vars vs group_vars vs extra vars); `when` on bare variables or string booleans; `loop` vs `with_*`; Jinja2 templating and escaping in `.j2`; check-mode support; `serial` for rolling changes.

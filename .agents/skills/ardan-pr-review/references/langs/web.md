@@ -1,6 +1,6 @@
 # Vue / JS / TS / CSS idioms
 
-**Tools:** an LSP if available, else `rg`/`ast-grep`. **Checks:** `jscpd` (clones); the repo's own `lint`/`typecheck`/`test` scripts arrive as extra checks when approved.
+**Tools:** an LSP if available, else `rg`/`ast-grep`. **Checks:** `jscpd` (clones); the repo's own `lint`/`typecheck`/`test` scripts arrive as extra checks when approved, for a maintainer PR only.
 
 ## Correctness
 Reactivity (mutating props, lost reactivity on destructuring, `watch` without cleanup), leaked listeners/timers/subscriptions, unhandled async, race between overlapping requests, stale closures, `==` coercion, a11y (labels, roles, keyboard, focus).

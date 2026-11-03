@@ -18,7 +18,7 @@ The depth (`Review depth:` in your prompt, `depth=` in `scope.txt`) sets what yo
 | File                              | Holds                                                                                                   |
 |-----------------------------------|---------------------------------------------------------------------------------------------------------|
 | `brief.md`                        | **Read first.** Summary, acceptance criteria (AC1…), per-file notes, changed symbols and callers, repo rules. |
-| `scope.txt`                       | Scope, head commit, counts, ecosystems, idioms, `generated=` (skipped or included), routing signals. |
+| `scope.txt`                       | Scope, head commit, counts, ecosystems, idioms, `generated=` (skipped or included), `trust=` (`maintainer` or `untrusted`) with `trust_reason=`, routing signals. |
 | `files.tsv`                       | `status added deleted lang kind layer path` per reviewed file; `kind` is prod (code and infrastructure), test, doc, config, or — only with `generated=included` — generated/vendor. `layer` is set for Go only. |
 | `stack.tsv`, `stack.md`           | `eco unit files marker` per build/deploy unit (Go module, crate, Terraform module, chart, …); `stack.md` (when present): the repo's ecosystems, its own quality gates, and idioms for ecosystems with no idiom file. |
 | `symbols.tsv`                     | `status kind name path line` for added, removed, and modified funcs, types, Terraform blocks (addresses such as `aws_s3_bucket.this`, `var.x`), and Helm templates. |
@@ -34,8 +34,8 @@ The depth (`Review depth:` in your prompt, `depth=` in `scope.txt`) sets what yo
 ## Rules
 
 1. **Batch your reads.** Each turn re-reads your whole context, so issue independent reads (contract, lenses, brief, the files you need) together in one turn, not one per turn.
-2. **Don't redo preprocessing.** No `git` to rediscover scope, no reading the whole diff to get oriented, no re-running what `checks/` covers. One narrow command to prove or refute a finding is fine (one test by name, an `rg`, a single render), within `checks/setup.txt`. Never one that deploys, applies, or mutates state.
-3. **Read-only.** Write only your report (security may also write PoCs). If a write is refused, never retry it through Bash or any other tool: put the content in your reply and say the write was refused.
+2. **Don't redo preprocessing.** No `git` to rediscover scope, no reading the whole diff to get oriented, no re-running what `checks/` covers. One narrow command to prove or refute a finding is fine (an `rg`, a single render; one test by name only with `trust=maintainer`), within `checks/setup.txt`. Never one that deploys, applies, or mutates state.
+3. **Read-only, and never run the reviewed code unless `trust=maintainer`.** No tests, builds, scripts, or PoCs of the change otherwise; reading, `rg`, and the language server are fine. Rows skipped with "runs the reviewed code" are not findings and not Open checks: the aggregator notes them once. Write only your report (security may also write PoCs). If a write is refused, never retry it through Bash or any other tool: put the content in your reply and say the write was refused.
 4. **Never open another run** under `.reviews/`.
 5. **Tools before eyeballing.** The language tool your idiom file names (Go: `gopls` MCP), then `rg`/`ast-grep`.
 6. **Repo rules are authoritative.** `rules.txt`, the repo's lint configs, and the skills your idiom files name (Go: `use-modern-go`, `ardan-service-architecture`).

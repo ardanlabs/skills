@@ -31,7 +31,7 @@ Sub-agents are read-only except for PoCs.
 
 ## Running the project
 
-Only when static reading is inconclusive, and only as the project interaction guide in your prompt allows. Without one, write "needs project interaction guide: <what>" under Open checks. Local/test instances only; nothing destructive, no real data.
+Only with `Trust: maintainer` in your prompt, only when static reading is inconclusive, and only as the project interaction guide in your prompt allows. Otherwise never run the project or a PoC: write the PoC if it helps and say under Open checks that it was not run. Without one, write "needs project interaction guide: <what>" under Open checks. Local/test instances only; nothing destructive, no real data.
 
 ## Intent
 

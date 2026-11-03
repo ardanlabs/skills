@@ -1,6 +1,6 @@
 # Terraform / OpenTofu idioms
 
-**Tools:** the binary named in `stack.tsv` (`terraform` or `tofu`); `rg` for references (`refs.tsv` names are addresses: `aws_s3_bucket.this`, `module.vpc`, `var.name`). **Checks:** `tf-fmt`, `tf-validate` (`init -backend=false`: providers and modules, no state, no plan), `tflint`, `iac-scan`. Never run `plan`, `apply`, `destroy`, `import`, `state`, or `test` against real infrastructure — no reviewer has the state or the credentials. An init failure (private registry, credentials) is an Open check, not a finding.
+**Tools:** the binary named in `stack.tsv` (`terraform` or `tofu`); `rg` for references (`refs.tsv` names are addresses: `aws_s3_bucket.this`, `module.vpc`, `var.name`). **Checks:** `tf-fmt`, `tflint`, `iac-scan`; for a maintainer PR also `tf-validate` (`init -backend=false`: providers and modules, no state, no plan) and `tflint` with the repo's config and plugins — otherwise tflint runs its bundled rules only. Never run `plan`, `apply`, `destroy`, `import`, `state`, or `test` against real infrastructure — no reviewer has the state or the credentials. An init failure (private registry, credentials) is an Open check, not a finding.
 
 ## Correctness
 - **Replacement risk:** a renamed or moved resource/module without a `moved` block, a `count` ↔ `for_each` switch, changed `for_each` keys, or a changed force-new argument destroys and recreates it. On stateful resources (databases, buckets, volumes, KMS keys, DNS zones) that is G4; name the address.

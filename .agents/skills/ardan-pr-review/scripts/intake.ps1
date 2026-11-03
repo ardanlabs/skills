@@ -6,6 +6,7 @@
 # files. -Exclude drops paths from the scope. -Depth: see intake.sh (review-set.tsv).
 # Size guard: see intake.sh. Generated and vendored files are skipped unless -IncludeGenerated;
 # symlinks are never reviewed. -DryRun prints the summary without writing anything.
+# Trust: see intake.sh — trust=maintainer only for a -Pr from a maintainer, on a base-repo branch.
 # Exit: 0 ok | 2 usage | 3 code on disk is not the code under review | 4 empty diff | 5 not a git repo.
 param(
     [string]$Id = '',
@@ -818,6 +819,26 @@ try {
     $missing = @($missing)
     Out-Lines (Join-Path $ctx 'missing.tsv') $missing
 
+    # --- trust: may checks run the reviewed code? (see intake.sh) ----------------------------
+    $trust = 'untrusted'; $trustReason = 'not a pull request (--pr)'
+    if ($Pr) {
+        $trustReason = 'could not read the PR author from GitHub'
+        $tj = ((& gh pr view $Pr --json author,isCrossRepository,url --jq '.author.login + " " + (.isCrossRepository | tostring) + " " + .url' 2>$null) -join ' ').Trim()
+        $parts = @($tj -split ' ') + @('', '', '')
+        $login = $parts[0]; $cross = $parts[1]; $prUrl = $parts[2]
+        $prHost = if ($prUrl -cmatch '^https://([^/]*)/[^/]*/[^/]*/pull/') { $Matches[1] } else { '' }
+        $repo = if ($prUrl -cmatch '^https://[^/]*/([^/]*/[^/]*)/pull/') { $Matches[1] } else { '' }
+        if ($login -and $repo) {
+            if ($cross -ne 'false') { $trustReason = 'PR head branch is in a fork' }
+            else {
+                $perm = ((& gh api --hostname $prHost "repos/$repo/collaborators/$login/permission" --jq .permission 2>$null) -join '').Trim()
+                if ('admin', 'maintain', 'write' -ccontains $perm) { $trust = 'maintainer'; $trustReason = "$login has $perm access to $repo; head branch in $repo" }
+                elseif (-not $perm) { $trustReason = "could not read $login's permission on $repo" }
+                else { $trustReason = "$login has $perm access to $repo" }
+            }
+        }
+    }
+
     # --- scope.txt ----------------------------------------------------------------------
     $langs = ($rev | Group-Object Lang | ForEach-Object { "$($_.Name):$($_.Count)" }) -join ' '
     $branch = GitOut symbolic-ref --short -q HEAD; if (-not $branch) { $branch = 'detached' }
@@ -836,7 +857,7 @@ try {
     $scope = @("id=$slug", "nn=$nn", "run=$run", "root=$top", "scope=$desc", "depth=$Depth", "head=$head", "base=$baseSha", "branch=$branch",
         "files=$($allRecs.Count)", "reviewable_files=$($rev.Count)", "skipped_files=$($skippedRecs.Count)", "lines_added=$added", "lines_deleted=$deleted",
         "code_files=$($code.Count)", "code_lines_changed=$codeLines", "languages=$langs", "ecosystems=$ecos", "idioms=$($idioms -join ',')",
-        "generated=$(if ($IncludeGenerated) { 'included' } else { 'skipped' })", "go_packages=$($pk.Count)",
+        "generated=$(if ($IncludeGenerated) { 'included' } else { 'skipped' })", "trust=$trust", "trust_reason=$trustReason", "go_packages=$($pk.Count)",
         "symbols=$($syms.Count)", "refs=$($refs.Count)", "shards=$shards",
         "diff_tokens_est=$tokReview") + $setInfo + @("noise_tokens_est=$tokNoise", "size_warnings=$($sizeLines.Count)", "missing_tools=$($missing.Count)") + $signals
     Out-Lines (Join-Path $ctx 'scope.txt') $scope

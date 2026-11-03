@@ -3,7 +3,7 @@
 **Tools:** `gopls` MCP (`go_symbol_references`, `go_search`, `go_file_context`), else `gopls`/`go doc`, then `rg`. Skills: `use-modern-go` on every `.go` file; `ardan-service-architecture` on files with a `layer` (`app`, `business`, `storage`, `foundation`) — `references/types.md` for boundaries, `branching.md` for conditionals, `events.md` for domain events, `extensions.md` only when extension wiring is touched.
 
 **Checks** (`checks/summary.tsv`; package-wide tools report on whole packages, only in-scope hits count):
-- `go-build`, `go-vet`, `staticcheck`, `golangci-lint` — each hit is a finding at the Gate its effect warrants.
+- `go-build`, `go-vet`, `staticcheck`, `golangci-lint` — each hit is a finding at the Gate its effect warrants. (`golangci-lint` is skipped for an untrusted change whose config loads custom linter plugins.)
 - `checklocks` — a violation of an existing `+checklocks`/`+checkatomic` annotation is a data race (G4). "may require checklocks annotation for X" names the lock guarding those fields: verify in-scope code holds it on every access.
 - `nilaway` — candidate nil dereferences; confirm the nil flow before reporting, else Open check.
 - `go-fix` — modernizer diff on in-scope lines: G1 (G2 where `use-modern-go` makes it a rule). `gofmt`, `go-mod-tidy` — G2.
@@ -24,7 +24,7 @@ The type-boundary rule: API request/response structs use primitives; DB rows use
 - G4: layer-boundary or storage-isolation violation, constructible invalid Business state, converter bypass. Extra fields: `Type: <Name> (layer)`, `Crossing: toBus | fromBusResponse | toDB | none`.
 
 ## Tests
-Table-driven tests with named subtests; `errors.Is/As` on error paths; negative, validation, boundary, cancellation, timeout, transaction and store-failure cases; HTTP request/response; converters; strong-type parsing. Tests ran with `-race`: a `WARNING: DATA RACE` whose stack touches in-scope code is G4 — quote the two conflicting frames. Prove a point with one `go test -run TestX ./pkg`.
+Table-driven tests with named subtests; `errors.Is/As` on error paths; negative, validation, boundary, cancellation, timeout, transaction and store-failure cases; HTTP request/response; converters; strong-type parsing. For a maintainer PR tests ran with `-race`: a `WARNING: DATA RACE` whose stack touches in-scope code is G4 — quote the two conflicting frames; prove a point with one `go test -run TestX ./pkg`. Otherwise `go test` didn't run.
 
 ## Security
 `gosec`, `govulncheck` rows; trace taint from request/env/file to sink with `gopls`; `database/sql` string building, `exec.Command` with a shell, `html/template` vs `text/template`, `InsecureSkipVerify`, `math/rand` for tokens.

@@ -1,6 +1,6 @@
 # Python idioms
 
-**Tools:** an LSP (pyright/pylsp) if available, else `rg`. **Checks:** `ruff`, `ruff-format`, `mypy` (when the repo configures it), `pytest`, `bandit`, `pip-audit`. The repo's own tools (tox/nox/uv/poetry scripts) arrive as extra checks when approved.
+**Tools:** an LSP (pyright/pylsp) if available, else `rg`. **Checks:** `ruff`, `ruff-format`, `mypy` (when the repo configures it; for an untrusted change with default settings, since the config can load plugins), `bandit`, `pip-audit` (pins as written, nothing resolved; unpinned requirements are reported, not audited); `pytest` for a maintainer PR only. The repo's own tools (tox/nox/uv/poetry scripts) arrive as extra checks when approved, for a maintainer PR only.
 
 ## Correctness
 Mutable default arguments; late-binding closures in loops; `is` vs `==`; shadowed builtins; naive vs aware `datetime`; blocking calls inside `async def`; un-awaited coroutines; resource handling without `with`; import-time side effects; type hints that contradict behavior.
